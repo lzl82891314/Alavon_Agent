@@ -1,0 +1,24 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:sqlite:${avalon.storage.database-path}
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      connection-init-sql: PRAGMA foreign_keys=ON
+      maximum-pool-size: 4
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+  flyway:
+    enabled: true
+
+avalon:
+  storage:
+    database-path: ${user.home}/.avalon-agent/arenas/default--37a8eec1/avalon-v1.sqlite
+  app-name: Avalon AI
+  console:
+    enabled: false

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="avalon-config" />
+        <module name="avalon-persistence" />
+        <module name="avalon-api" />
+        <module name="avalon-testkit" />
+        <module name="avalon-runtime" />
+        <module name="avalon-agent" />
+        <module name="avalon-app" />
+        <module name="avalon-core" />
+      </profile>
+    </annotationProcessing>
+  </component>
+</project>

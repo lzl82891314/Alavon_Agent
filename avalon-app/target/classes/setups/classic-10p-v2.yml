@@ -1,0 +1,14 @@
+templateId: classic-10p-v2
+playerCount: 10
+enabled: true
+roleIds:
+  - MERLIN
+  - PERCIVAL
+  - LOYAL_SERVANT
+  - LOYAL_SERVANT
+  - LOYAL_SERVANT
+  - LOYAL_SERVANT
+  - MORGANA
+  - ASSASSIN
+  - MORDRED
+  - OBERON

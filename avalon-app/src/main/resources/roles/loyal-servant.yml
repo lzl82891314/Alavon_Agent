@@ -1,0 +1,12 @@
+roleId: LOYAL_SERVANT
+displayName: Loyal Servant
+camp: GOOD
+description: Ordinary loyal good player with no special knowledge.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: false
+knowledgeRules: []
+actionCapabilities: []
+passiveTraits: []
+

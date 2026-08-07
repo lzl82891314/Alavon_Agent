@@ -1,0 +1,36 @@
+ruleSetId: avalon-classic-5p-v1
+name: Avalon Classic 5 Players
+version: 1.0.0
+minPlayers: 5
+maxPlayers: 5
+supportedSetupTemplateIds:
+  - classic-5p-v1
+teamSizeRules:
+  - round: 1
+    teamSize: 2
+  - round: 2
+    teamSize: 3
+  - round: 3
+    teamSize: 2
+  - round: 4
+    teamSize: 3
+  - round: 5
+    teamSize: 3
+votingRule:
+  maxRejectedTeamVotesBeforeAutoLoss: 5
+missionRule:
+  failThresholdByRound:
+    "1": 1
+    "2": 1
+    "3": 1
+    "4": 1
+    "5": 1
+assassinationRule:
+  enabled: true
+  assassinRoleId: ASSASSIN
+  merlinRoleId: MERLIN
+visibilityPolicy:
+  useRoleKnowledgeRules: true
+setupRule:
+  randomAssignment: true
+

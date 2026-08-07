@@ -1,0 +1,12 @@
+roleId: OBERON
+displayName: Oberon
+camp: EVIL
+description: Evil, but isolated. Oberon does not know the other evil players and they do not know Oberon.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: false
+knowledgeRules: []
+actionCapabilities: []
+passiveTraits:
+  - HIDDEN_FROM_EVIL

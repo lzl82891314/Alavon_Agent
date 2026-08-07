@@ -1,0 +1,16 @@
+roleId: PERCIVAL
+displayName: Percival
+camp: GOOD
+description: Sees Merlin or Morgana as a possible Merlin.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: false
+knowledgeRules:
+  - type: SEE_ROLE_AMBIGUITY
+    targetRoles:
+      - MERLIN
+      - MORGANA
+actionCapabilities: []
+passiveTraits: []
+

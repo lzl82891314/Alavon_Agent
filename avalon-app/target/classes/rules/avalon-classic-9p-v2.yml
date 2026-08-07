@@ -1,0 +1,35 @@
+ruleSetId: avalon-classic-9p-v2
+name: Avalon Classic 9 Players V2
+version: 2.0.0
+minPlayers: 9
+maxPlayers: 9
+supportedSetupTemplateIds:
+  - classic-9p-v2
+teamSizeRules:
+  - round: 1
+    teamSize: 3
+  - round: 2
+    teamSize: 4
+  - round: 3
+    teamSize: 4
+  - round: 4
+    teamSize: 5
+  - round: 5
+    teamSize: 5
+votingRule:
+  maxRejectedTeamVotesBeforeAutoLoss: 5
+missionRule:
+  failThresholdByRound:
+    "1": 1
+    "2": 1
+    "3": 1
+    "4": 2
+    "5": 1
+assassinationRule:
+  enabled: true
+  assassinRoleId: ASSASSIN
+  merlinRoleId: MERLIN
+visibilityPolicy:
+  useRoleKnowledgeRules: true
+setupRule:
+  randomAssignment: true

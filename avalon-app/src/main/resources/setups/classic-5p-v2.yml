@@ -1,0 +1,9 @@
+templateId: classic-5p-v2
+playerCount: 5
+enabled: true
+roleIds:
+  - MERLIN
+  - PERCIVAL
+  - LOYAL_SERVANT
+  - MORGANA
+  - ASSASSIN

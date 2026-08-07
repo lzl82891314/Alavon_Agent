@@ -1,0 +1,17 @@
+roleId: MERLIN
+displayName: Merlin
+camp: GOOD
+description: Knows most evil players, but must avoid being identified by the assassin.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: false
+knowledgeRules:
+  - type: SEE_PLAYERS_BY_CAMP
+    targetCamp: EVIL
+    exclusions:
+      - MORDRED
+actionCapabilities: []
+passiveTraits:
+  - HIDDEN_HIGH_VALUE_TARGET
+

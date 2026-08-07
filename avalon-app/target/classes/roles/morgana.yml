@@ -1,0 +1,14 @@
+roleId: MORGANA
+displayName: Morgana
+camp: EVIL
+description: Appears as Merlin to Percival.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: false
+knowledgeRules:
+  - type: SEE_ALLIED_EVIL_PLAYERS
+    exclusions:
+      - OBERON
+actionCapabilities: []
+passiveTraits: []

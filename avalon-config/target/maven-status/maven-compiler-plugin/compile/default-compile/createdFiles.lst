@@ -1,0 +1,6 @@
+com\example\avalon\config\io\YamlConfigLoader.class
+com\example\avalon\config\exception\ConfigValidationException.class
+com\example\avalon\config\exception\ConfigLoadException.class
+com\example\avalon\config\model\AvalonConfigRegistry.class
+com\example\avalon\config\model\LlmModelDefinition.class
+com\example\avalon\config\service\SetupValidationService.class

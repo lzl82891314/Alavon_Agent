@@ -1,0 +1,16 @@
+roleId: ASSASSIN
+displayName: Assassin
+camp: EVIL
+description: Can assassinate Merlin at the end of the game if evil still has a chance.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: true
+knowledgeRules:
+  - type: SEE_ALLIED_EVIL_PLAYERS
+    exclusions:
+      - OBERON
+actionCapabilities:
+  - ASSASSINATE
+passiveTraits: []
+

@@ -1,0 +1,11 @@
+modelId: gpt-5.4
+displayName: OpenAI GPT-5.4
+provider: openai
+modelName: gpt-5.4
+temperature: 0.2
+maxTokens: 180
+enabled: true
+providerOptions:
+  baseUrl: https://gcapi.cn/v1
+  response_format:
+    type: json_object

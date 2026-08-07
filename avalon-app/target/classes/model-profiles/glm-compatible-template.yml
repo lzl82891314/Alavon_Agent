@@ -1,0 +1,13 @@
+# Template only: this provider is routed through the shared OpenAI-compatible gateway.
+modelId: glm-5
+displayName: glm-5
+provider: glm
+modelName: glm-5
+temperature: 0.2
+maxTokens: 320
+enabled: true
+providerOptions:
+  baseUrl: https://gcapi.cn/v1
+  instructionRole: system
+  response_format:
+    type: json_object

@@ -1,0 +1,15 @@
+roleId: MORDRED
+displayName: Mordred
+camp: EVIL
+description: Hidden from Merlin while still coordinating with the evil team.
+canJoinMission: true
+canVote: true
+canLead: true
+canAssassinate: false
+knowledgeRules:
+  - type: SEE_ALLIED_EVIL_PLAYERS
+    exclusions:
+      - OBERON
+actionCapabilities: []
+passiveTraits:
+  - HIDDEN_FROM_MERLIN
