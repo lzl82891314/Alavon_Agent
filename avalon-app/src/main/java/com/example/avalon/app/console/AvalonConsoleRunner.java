@@ -795,8 +795,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
 
     private ClassicSetupSelection classicSetupSelection(int playerCount) {
         return new ClassicSetupSelection(
-                "avalon-classic-%sp-v2".formatted(playerCount),
-                "classic-%sp-v2".formatted(playerCount)
+                "avalon-classic-%sp".formatted(playerCount),
+                "classic-%sp".formatted(playerCount)
         );
     }
 

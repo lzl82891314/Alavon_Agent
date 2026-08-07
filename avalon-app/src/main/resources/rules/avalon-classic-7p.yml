@@ -1,21 +1,21 @@
-ruleSetId: avalon-classic-10p-v2
-name: Avalon Classic 10 Players V2
-version: 2.0.0
-minPlayers: 10
-maxPlayers: 10
+ruleSetId: avalon-classic-7p
+name: Avalon Classic 7 Players
+version: 1.0.0
+minPlayers: 7
+maxPlayers: 7
 supportedSetupTemplateIds:
-  - classic-10p-v2
+  - classic-7p
 teamSizeRules:
   - round: 1
-    teamSize: 3
+    teamSize: 2
   - round: 2
-    teamSize: 4
+    teamSize: 3
   - round: 3
-    teamSize: 4
+    teamSize: 3
   - round: 4
-    teamSize: 5
+    teamSize: 4
   - round: 5
-    teamSize: 5
+    teamSize: 4
 votingRule:
   maxRejectedTeamVotesBeforeAutoLoss: 5
 missionRule:

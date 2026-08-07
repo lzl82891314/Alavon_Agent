@@ -1,10 +1,10 @@
-ruleSetId: avalon-classic-5p-v1
+ruleSetId: avalon-classic-5p
 name: Avalon Classic 5 Players
 version: 1.0.0
 minPlayers: 5
 maxPlayers: 5
 supportedSetupTemplateIds:
-  - classic-5p-v1
+  - classic-5p
 teamSizeRules:
   - round: 1
     teamSize: 2
@@ -33,4 +33,3 @@ visibilityPolicy:
   useRoleKnowledgeRules: true
 setupRule:
   randomAssignment: true
-

@@ -57,7 +57,7 @@ public class ConsoleTranscriptPrinter {
                 说明
                   `new` 向导默认支持 5 到 10 人标准阿瓦隆。
                   局后报告默认写入 `target/reports/avalon/<gameId>-decision-report.md`。
-                  V1 仍不支持真人实时提交动作。
+                  真人玩家可通过 REST 动作提交接口参与游戏。
                   模型池 LLM 席位默认按座位绑定静态或托管 model profile。
                   如果想离线演示，可选择 `noop` 使用确定性回退策略。
                 """;

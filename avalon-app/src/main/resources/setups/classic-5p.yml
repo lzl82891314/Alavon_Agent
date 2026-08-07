@@ -1,4 +1,4 @@
-templateId: classic-5p-v1
+templateId: classic-5p
 playerCount: 5
 enabled: true
 roleIds:
@@ -7,4 +7,3 @@ roleIds:
   - LOYAL_SERVANT
   - MORGANA
   - ASSASSIN
-

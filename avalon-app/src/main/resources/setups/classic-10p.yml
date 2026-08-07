@@ -1,5 +1,5 @@
-templateId: classic-9p-v2
-playerCount: 9
+templateId: classic-10p
+playerCount: 10
 enabled: true
 roleIds:
   - MERLIN
@@ -11,3 +11,4 @@ roleIds:
   - MORGANA
   - ASSASSIN
   - MORDRED
+  - OBERON

@@ -1,10 +1,10 @@
-ruleSetId: avalon-classic-9p-v2
-name: Avalon Classic 9 Players V2
-version: 2.0.0
+ruleSetId: avalon-classic-9p
+name: Avalon Classic 9 Players
+version: 1.0.0
 minPlayers: 9
 maxPlayers: 9
 supportedSetupTemplateIds:
-  - classic-9p-v2
+  - classic-9p
 teamSizeRules:
   - round: 1
     teamSize: 3
