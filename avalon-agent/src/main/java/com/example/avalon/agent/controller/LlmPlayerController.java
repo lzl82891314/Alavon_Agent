@@ -138,9 +138,9 @@ public class LlmPlayerController implements PlayerController {
         payload.put("roleId", request.getRoleId());
         payload.put("modelId", request.getModelId());
         payload.put("provider", request.getProvider());
+        payload.put("protocol", request.getProtocol());
         payload.put("modelName", request.getModelName());
         payload.put("temperature", request.getTemperature());
-        payload.put("maxTokens", request.getMaxTokens());
         payload.put("allowedActions", request.getAllowedActions());
         payload.put("rulesSummary", request.getRulesSummary());
         payload.put("privateKnowledge", request.getPrivateKnowledge());

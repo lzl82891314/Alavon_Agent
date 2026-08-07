@@ -200,9 +200,9 @@ public final class YamlConfigLoader {
                 requiredString(yaml, "modelId", file),
                 requiredString(yaml, "displayName", file),
                 requiredString(yaml, "provider", file),
+                requiredString(yaml, "protocol", file),
                 requiredString(yaml, "modelName", file),
                 optionalDouble(yaml, "temperature", file),
-                optionalInt(yaml, "maxTokens", file),
                 asOptionalMap(yaml.get("providerOptions"), "providerOptions", file),
                 requiredBoolean(yaml, "enabled", file)
         );

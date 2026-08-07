@@ -293,7 +293,7 @@ public class PersistentGameApplicationService implements GameApplicationService 
             case NONE -> LlmSelectionConfig.none();
             case SEAT_BINDING -> seatBindingSelection(request, llmPlayers);
             case ROLE_BINDING -> roleBindingSelection(request, setupTemplate);
-            case RANDOM_POOL -> randomPoolSelection(request, llmPlayerCount);
+            case RANDOM_POOL -> randomPoolSelection(request);
         };
     }
 
@@ -336,14 +336,17 @@ public class PersistentGameApplicationService implements GameApplicationService 
         return new LlmSelectionConfig(LlmSelectionMode.ROLE_BINDING, Map.of(), roleBindings, List.of());
     }
 
-    private LlmSelectionConfig randomPoolSelection(CreateGameRequest.LlmSelectionRequest request, int llmPlayerCount) {
+    private LlmSelectionConfig randomPoolSelection(CreateGameRequest.LlmSelectionRequest request) {
         List<String> candidateModelIds = request.getCandidateModelIds().stream()
                 .map(String::trim)
                 .filter(modelId -> !modelId.isBlank())
                 .distinct()
                 .toList();
-        if (candidateModelIds.size() < llmPlayerCount) {
-            throw new IllegalArgumentException("RANDOM_POOL requires at least " + llmPlayerCount + " distinct candidateModelIds");
+        if (candidateModelIds.isEmpty()) {
+            candidateModelIds = modelProfileCatalogService.enabledModelIds();
+        }
+        if (candidateModelIds.isEmpty()) {
+            throw new IllegalArgumentException("RANDOM_POOL requires at least one enabled model profile");
         }
         candidateModelIds.forEach(modelProfileCatalogService::requireEnabledProfile);
         return new LlmSelectionConfig(LlmSelectionMode.RANDOM_POOL, Map.of(), Map.of(), candidateModelIds);

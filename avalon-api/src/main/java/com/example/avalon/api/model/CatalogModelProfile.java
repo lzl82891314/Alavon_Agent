@@ -10,9 +10,9 @@ public record CatalogModelProfile(
         boolean editable,
         boolean enabled,
         String provider,
+        String protocol,
         String modelName,
         Double temperature,
-        Integer maxTokens,
         Map<String, Object> providerOptions
 ) {
     public CatalogModelProfile {

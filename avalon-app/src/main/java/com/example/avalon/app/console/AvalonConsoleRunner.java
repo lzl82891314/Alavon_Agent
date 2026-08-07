@@ -235,7 +235,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             );
             case RANDOM_MODEL_POOL -> new CreateRequestDraft(
                     modelPoolLlmSeats(playerCount),
-                    promptRandomPoolSelection(reader, playerCount)
+                    promptRandomPoolSelection(reader)
             );
             case CUSTOM -> promptCustomSeats(reader, setupTemplate, playerCount);
         };
@@ -273,8 +273,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private SeatPreset promptPreset(BufferedReader reader) throws IOException {
         while (true) {
             String raw = promptString(reader,
-                    "席位预设 [custom/scripted/noop/seat/role/random]（默认 seat）：",
-                    "seat").toLowerCase(Locale.ROOT);
+                    "席位预设 [custom/scripted/noop/seat/role/random]（默认 random）：",
+                    "random").toLowerCase(Locale.ROOT);
             switch (raw) {
                 case "custom", "c" -> {
                     return SeatPreset.CUSTOM;
@@ -404,7 +404,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                                                                       SetupTemplate setupTemplate,
                                                                       List<Integer> llmSeatNos) throws IOException {
         while (true) {
-            String raw = promptString(reader, "LLM 选模方式 [seat/role/random]（默认 seat）：", "seat").toLowerCase(Locale.ROOT);
+            String raw = promptString(reader, "LLM 选模方式 [seat/role/random]（默认 random）：", "random").toLowerCase(Locale.ROOT);
             switch (raw) {
                 case "seat", "seat-binding", "player", "p" -> {
                     return promptSeatBindingSelection(reader, llmSeatNos);
@@ -413,7 +413,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                     return promptRoleBindingSelection(reader, setupTemplate);
                 }
                 case "random", "rand" -> {
-                    return promptRandomPoolSelection(reader, llmSeatNos.size());
+                    return promptRandomPoolSelection(reader);
                 }
                 default -> System.out.println("无效选模方式。可选 seat、role 或 random。");
             }
@@ -461,23 +461,12 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         return request;
     }
 
-    private CreateGameRequest.LlmSelectionRequest promptRandomPoolSelection(BufferedReader reader,
-                                                                            int requiredCount) throws IOException {
+    private CreateGameRequest.LlmSelectionRequest promptRandomPoolSelection(BufferedReader reader) {
         List<ModelProfileResponse> profiles = availableModelProfiles();
         printModelProfiles(profiles);
-        System.out.println("请为随机模型池选择 " + requiredCount + " 个不重复的 modelId。");
-        List<String> selectedIds = new ArrayList<>();
-        while (selectedIds.size() < requiredCount) {
-            String modelId = promptModelId(reader, profiles, "随机池 model " + (selectedIds.size() + 1) + "：");
-            if (selectedIds.contains(modelId)) {
-                System.out.println("该 modelId 已在随机池中，请选择其他值。");
-                continue;
-            }
-            selectedIds.add(modelId);
-        }
+        System.out.println("将从全部已启用 model profile 中按本局 seed 随机分配；模型可被多个席位复用。");
         CreateGameRequest.LlmSelectionRequest request = new CreateGameRequest.LlmSelectionRequest();
         request.setMode("RANDOM_POOL");
-        request.setCandidateModelIds(selectedIds);
         return request;
     }
 

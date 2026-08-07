@@ -91,7 +91,10 @@ final class ConsoleGameSession {
                 request.getLlmSelection().getRoleBindings().forEach((roleId, modelId) ->
                         llmSelectionDetails.add(roleId + " -> " + modelId));
             } else if ("RANDOM_POOL".equalsIgnoreCase(request.getLlmSelection().getMode())) {
-                llmSelectionDetails.add("pool=" + request.getLlmSelection().getCandidateModelIds());
+                List<String> candidateModelIds = request.getLlmSelection().getCandidateModelIds();
+                llmSelectionDetails.add(candidateModelIds.isEmpty()
+                        ? "pool=all enabled model profiles"
+                        : "pool=" + candidateModelIds);
             }
         }
     }

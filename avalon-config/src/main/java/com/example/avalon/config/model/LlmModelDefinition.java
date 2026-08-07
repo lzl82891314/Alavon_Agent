@@ -7,9 +7,9 @@ public record LlmModelDefinition(
         String modelId,
         String displayName,
         String provider,
+        String protocol,
         String modelName,
         Double temperature,
-        Integer maxTokens,
         Map<String, Object> providerOptions,
         boolean enabled
 ) {

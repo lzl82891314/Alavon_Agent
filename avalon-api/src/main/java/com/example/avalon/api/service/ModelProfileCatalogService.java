@@ -6,11 +6,13 @@ import com.example.avalon.api.model.CatalogModelProfile;
 import com.example.avalon.api.model.ModelProfileSource;
 import com.example.avalon.config.model.AvalonConfigRegistry;
 import com.example.avalon.config.model.LlmModelDefinition;
+import com.example.avalon.agent.gateway.ModelProtocolAdapterRegistry;
 import com.example.avalon.persistence.model.ModelProfileRecord;
 import com.example.avalon.persistence.store.ModelProfileStore;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -25,16 +27,32 @@ import java.util.Objects;
 public class ModelProfileCatalogService {
     private final AvalonConfigRegistry configRegistry;
     private final ModelProfileStore modelProfileStore;
+    private final ModelProtocolAdapterRegistry protocolAdapters;
     private final ObjectMapper objectMapper;
 
-    public ModelProfileCatalogService(AvalonConfigRegistry configRegistry, ModelProfileStore modelProfileStore) {
+    public ModelProfileCatalogService(AvalonConfigRegistry configRegistry,
+                                      ModelProfileStore modelProfileStore,
+                                      ModelProtocolAdapterRegistry protocolAdapters) {
         this.configRegistry = configRegistry;
         this.modelProfileStore = modelProfileStore;
+        this.protocolAdapters = protocolAdapters;
         this.objectMapper = new ObjectMapper().findAndRegisterModules();
+    }
+
+    @PostConstruct
+    void validateRegisteredProtocols() {
+        mergedProfiles().forEach(profile -> protocolAdapters.require(profile.protocol()));
     }
 
     public List<ModelProfileResponse> listAll() {
         return mergedProfiles().stream().map(this::toResponse).toList();
+    }
+
+    public List<String> enabledModelIds() {
+        return mergedProfiles().stream()
+                .filter(CatalogModelProfile::enabled)
+                .map(CatalogModelProfile::modelId)
+                .toList();
     }
 
     public ModelProfileResponse get(String modelId) {
@@ -50,6 +68,7 @@ public class ModelProfileCatalogService {
         if (!profile.enabled()) {
             throw new IllegalArgumentException("Model profile is disabled: " + modelId);
         }
+        protocolAdapters.require(profile.protocol());
         return profile;
     }
 
@@ -120,9 +139,9 @@ public class ModelProfileCatalogService {
                 modelId,
                 normalized(request.getDisplayName(), "displayName"),
                 normalized(request.getProvider(), "provider"),
+                normalizedProtocol(request.getProtocol()),
                 normalized(request.getModelName(), "modelName"),
                 request.getTemperature(),
-                request.getMaxTokens(),
                 writeProviderOptions(request.getProviderOptions()),
                 request.getEnabled() == null || request.getEnabled(),
                 createdAt,
@@ -137,12 +156,10 @@ public class ModelProfileCatalogService {
         }
         normalized(request.getDisplayName(), "displayName");
         normalized(request.getProvider(), "provider");
+        normalizedProtocol(request.getProtocol());
         normalized(request.getModelName(), "modelName");
         if (request.getTemperature() != null && request.getTemperature() < 0.0) {
             throw new IllegalArgumentException("temperature must be non-negative");
-        }
-        if (request.getMaxTokens() != null && request.getMaxTokens() <= 0) {
-            throw new IllegalArgumentException("maxTokens must be positive");
         }
         validateProviderOptions(request.getProviderOptions());
     }
@@ -167,6 +184,9 @@ public class ModelProfileCatalogService {
             return;
         }
         Object baseUrlValue = providerOptions.get("baseUrl");
+        if (providerOptions.containsKey("protocol")) {
+            throw new IllegalArgumentException("protocol must be configured as a top-level model profile field");
+        }
         if (baseUrlValue == null) {
             return;
         }
@@ -182,6 +202,12 @@ public class ModelProfileCatalogService {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized.toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizedProtocol(String protocol) {
+        String normalized = normalized(protocol, "protocol").toUpperCase(Locale.ROOT);
+        protocolAdapters.require(normalized);
+        return normalized;
     }
 
     private Map<String, Object> readProviderOptions(String providerOptionsJson) {
@@ -200,9 +226,9 @@ public class ModelProfileCatalogService {
                 false,
                 definition.enabled(),
                 definition.provider(),
+                definition.protocol(),
                 definition.modelName(),
                 definition.temperature(),
-                definition.maxTokens(),
                 definition.providerOptions()
         );
     }
@@ -215,9 +241,9 @@ public class ModelProfileCatalogService {
                 true,
                 record.enabled(),
                 record.provider(),
+                record.protocol(),
                 record.modelName(),
                 record.temperature(),
-                record.maxTokens(),
                 readProviderOptions(record.providerOptionsJson())
         );
     }
@@ -230,9 +256,9 @@ public class ModelProfileCatalogService {
         response.setEditable(profile.editable());
         response.setEnabled(profile.enabled());
         response.setProvider(profile.provider());
+        response.setProtocol(profile.protocol());
         response.setModelName(profile.modelName());
         response.setTemperature(profile.temperature());
-        response.setMaxTokens(profile.maxTokens());
         response.setProviderOptions(sanitizedProviderOptions(profile.providerOptions()));
         return response;
     }

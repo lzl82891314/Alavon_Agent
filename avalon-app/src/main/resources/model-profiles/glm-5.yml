@@ -1,11 +1,11 @@
 # Template only: this provider is routed through the shared OpenAI-compatible gateway.
-modelId: minimax-m2.7
-displayName: minimax-m2.7
-provider: minimax
-modelName: minimax-m2.7
+modelId: glm-5
+displayName: glm-5
+provider: glm
+protocol: OPENAI_COMPATIBLE_CHAT
+modelName: glm-5
 temperature: 0.2
-maxTokens: 320
-enabled: true
+enabled: false
 providerOptions:
   baseUrl: https://gcapi.cn/v1
   instructionRole: system

@@ -6,40 +6,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 @Primary
 @Component
 public class RoutingAgentGateway implements AgentGateway {
-    private static final List<String> OPENAI_COMPATIBLE_PROVIDER_IDS = List.of(
-            "openai",
-            "minimax",
-            "glm",
-            "claude",
-            "qwen"
-    );
-    private static final Set<String> OPENAI_COMPATIBLE_PROVIDERS = Set.copyOf(OPENAI_COMPATIBLE_PROVIDER_IDS);
-
     private final AgentGateway noopGateway;
-    private final AgentGateway openAiGateway;
-    private final AgentGateway openAiResponsesGateway;
+    private final ModelProtocolAdapterRegistry protocolAdapters;
 
     @Autowired
-    public RoutingAgentGateway(NoopAgentGateway noopGateway, OpenAiChatCompletionsGateway openAiGateway,
-                               OpenAiResponsesGateway openAiResponsesGateway) {
-        this((AgentGateway) noopGateway, openAiGateway, openAiResponsesGateway);
-    }
-
-    RoutingAgentGateway(AgentGateway noopGateway, AgentGateway openAiGateway) {
-        this(noopGateway, openAiGateway, openAiGateway);
-    }
-
-    RoutingAgentGateway(AgentGateway noopGateway, AgentGateway openAiGateway, AgentGateway openAiResponsesGateway) {
+    public RoutingAgentGateway(NoopAgentGateway noopGateway, ModelProtocolAdapterRegistry protocolAdapters) {
         this.noopGateway = noopGateway;
-        this.openAiGateway = openAiGateway;
-        this.openAiResponsesGateway = openAiResponsesGateway;
+        this.protocolAdapters = protocolAdapters;
     }
 
     @Override
@@ -48,17 +26,7 @@ public class RoutingAgentGateway implements AgentGateway {
         if (provider == null || "noop".equals(provider)) {
             return noopGateway.playTurn(request);
         }
-        if (OPENAI_COMPATIBLE_PROVIDERS.contains(provider)) {
-            String protocol = OpenAiCompatibleSupport.stringOption(request.getProviderOptions(), "protocol");
-            return "responses".equalsIgnoreCase(protocol) && "openai".equals(provider)
-                    ? openAiResponsesGateway.playTurn(request)
-                    : openAiGateway.playTurn(request);
-        }
-        throw new IllegalStateException(
-                "Unsupported LLM provider '" + request.getProvider() + "'. Supported providers: "
-                        + String.join(", ", OPENAI_COMPATIBLE_PROVIDER_IDS)
-                        + ", noop"
-        );
+        return protocolAdapters.require(request.getProtocol()).playTurn(request);
     }
 
     private String normalizedProvider(String provider) {

@@ -14,7 +14,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -84,14 +83,14 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
                                                                LlmSelectionConfig selectionConfig,
                                                                long seed) {
         List<String> candidateIds = new ArrayList<>(new LinkedHashSet<>(selectionConfig.candidateModelIds()));
-        if (candidateIds.size() < llmPlayers.size()) {
-            throw new IllegalArgumentException("Random model pool must contain at least " + llmPlayers.size() + " distinct modelIds");
+        if (candidateIds.isEmpty()) {
+            throw new IllegalArgumentException("Random model pool must contain at least one modelId");
         }
-        Collections.shuffle(candidateIds, new Random(seed));
+        Random random = new Random(seed);
         Map<String, Map<String, Object>> resolvedConfigs = new LinkedHashMap<>();
         for (int index = 0; index < llmPlayers.size(); index++) {
             PlayerRegistration player = llmPlayers.get(index);
-            CatalogModelProfile profile = modelProfileCatalogService.requireEnabledProfile(candidateIds.get(index));
+            CatalogModelProfile profile = modelProfileCatalogService.requireEnabledProfile(candidateIds.get(random.nextInt(candidateIds.size())));
             resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player, profile));
         }
         return resolvedConfigs;
@@ -102,9 +101,9 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
         ModelProfile modelProfile = new ModelProfile();
         modelProfile.setModelId(profile.modelId());
         modelProfile.setProvider(profile.provider());
+        modelProfile.setProtocol(profile.protocol());
         modelProfile.setModelName(profile.modelName());
         modelProfile.setTemperature(profile.temperature());
-        modelProfile.setMaxTokens(profile.maxTokens());
         modelProfile.setProviderOptions(profile.providerOptions());
         config.setModelProfile(modelProfile);
         return objectMapper.convertValue(config, new TypeReference<Map<String, Object>>() { });

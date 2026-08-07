@@ -14,12 +14,17 @@ import java.util.Map;
 
 /** Adapter for the OpenAI Responses API; domain code remains dependent only on AgentGateway. */
 @Component
-public final class OpenAiResponsesGateway implements AgentGateway {
+public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
     private final OpenAiHttpTransport transport;
     private final ModelProfileApiKeyResolver apiKeys;
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
     public OpenAiResponsesGateway(OpenAiHttpTransport transport, ModelProfileApiKeyResolver apiKeys) { this.transport = transport; this.apiKeys = apiKeys; }
+
+    @Override
+    public String protocolId() {
+        return "OPENAI_RESPONSES";
+    }
 
     @Override public AgentTurnResult playTurn(AgentTurnRequest request) {
         Map<String,Object> options = OpenAiCompatibleSupport.effectiveProviderOptions(request.getProvider(), request.getProviderOptions());
@@ -36,11 +41,11 @@ public final class OpenAiResponsesGateway implements AgentGateway {
         root.put("model", r.getModelName() == null || r.getModelName().isBlank() ? "gpt-5.2" : r.getModelName());
         root.put("instructions", "You control an Avalon player. Return exactly one JSON object and do not reveal chain-of-thought.");
         root.put("input", r.getPromptText());
+        root.put("store", false);
         ObjectNode text = root.putObject("text");
         ObjectNode format = text.putObject("format");
         format.put("type", "json_object");
         if (r.getTemperature() != null) root.put("temperature", r.getTemperature());
-        if (r.getMaxTokens() != null && r.getMaxTokens() > 0) root.put("max_output_tokens", r.getMaxTokens());
         try { return json.writeValueAsString(root); } catch (Exception e) { throw new IllegalStateException("Cannot serialize Responses request", e); }
     }
 

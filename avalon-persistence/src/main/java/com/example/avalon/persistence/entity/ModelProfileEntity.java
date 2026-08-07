@@ -24,14 +24,14 @@ public class ModelProfileEntity {
     @Column(name = "provider", nullable = false, length = 64)
     private String provider;
 
+    @Column(name = "protocol", nullable = false, length = 64)
+    private String protocol;
+
     @Column(name = "model_name", nullable = false, length = 128)
     private String modelName;
 
     @Column(name = "temperature")
     private Double temperature;
-
-    @Column(name = "max_tokens")
-    private Integer maxTokens;
 
     @Column(name = "provider_options_json", columnDefinition = "TEXT")
     private String providerOptionsJson;
@@ -69,6 +69,14 @@ public class ModelProfileEntity {
         this.provider = provider;
     }
 
+    public String getProtocol() {
+        return protocol;
+    }
+
+    public void setProtocol(String protocol) {
+        this.protocol = protocol;
+    }
+
     public String getModelName() {
         return modelName;
     }
@@ -83,14 +91,6 @@ public class ModelProfileEntity {
 
     public void setTemperature(Double temperature) {
         this.temperature = temperature;
-    }
-
-    public Integer getMaxTokens() {
-        return maxTokens;
-    }
-
-    public void setMaxTokens(Integer maxTokens) {
-        this.maxTokens = maxTokens;
     }
 
     public String getProviderOptionsJson() {

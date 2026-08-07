@@ -1,11 +1,11 @@
 modelId: gpt-5.4
 displayName: OpenAI GPT-5.4
 provider: openai
+protocol: OPENAI_RESPONSES
 modelName: gpt-5.4
 temperature: 0.2
-maxTokens: 180
-enabled: true
+enabled: false
 providerOptions:
-  baseUrl: https://gcapi.cn/v1
-  response_format:
-    type: json_object
+  baseUrl: https://api.openai.com/v1
+  apiKeyEnv: OPENAI_API_KEY
+  timeoutMillis: 60000

@@ -14,8 +14,6 @@ import java.util.Locale;
 @Component
 public class ValidationRetryPolicy {
     private static final int DEFAULT_MAX_ATTEMPTS = 2;
-    private static final int MIN_CORRECTIVE_MAX_TOKENS = 320;
-    private static final int CORRECTIVE_TOKEN_INCREMENT = 320;
 
     private final PrivateKnowledgeExpressionValidator privateKnowledgeExpressionValidator;
 
@@ -70,7 +68,6 @@ public class ValidationRetryPolicy {
         String correctivePrompt = correctivePrompt(failure, next.getAllowedActions());
         if (correctivePrompt != null && !correctivePrompt.isBlank()) {
             next.setPromptText(appendPrompt(next.getPromptText(), correctivePrompt));
-            next.setMaxTokens(raisedMaxTokens(next.getMaxTokens()));
         }
         return next;
     }
@@ -90,11 +87,6 @@ public class ValidationRetryPolicy {
         String contentShape = stringValue(responseException.diagnostics().get("assistantContentShape"));
         String message = failure.getMessage() == null ? "" : failure.getMessage();
         return requiresCompressionRetry(finishReason, contentShape, message);
-    }
-
-    private int raisedMaxTokens(Integer currentMaxTokens) {
-        int current = currentMaxTokens == null ? 0 : currentMaxTokens;
-        return Math.max(current, MIN_CORRECTIVE_MAX_TOKENS) + CORRECTIVE_TOKEN_INCREMENT;
     }
 
     private String appendPrompt(String originalPrompt, String correctivePrompt) {

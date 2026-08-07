@@ -1,0 +1,12 @@
+modelId: claude-sonnet-4-6
+displayName: Claude Sonnet 4.6
+provider: anthropic
+protocol: ANTHROPIC_MESSAGES
+modelName: claude-sonnet-4-6
+temperature: 0.2
+enabled: false
+providerOptions:
+  baseUrl: https://api.anthropic.com/v1
+  apiKeyEnv: ANTHROPIC_API_KEY
+  anthropicVersion: 2023-06-01
+  maxOutputTokens: 8192

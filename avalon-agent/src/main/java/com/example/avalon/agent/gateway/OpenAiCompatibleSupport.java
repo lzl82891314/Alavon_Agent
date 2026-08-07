@@ -19,9 +19,7 @@ public final class OpenAiCompatibleSupport {
     public static final Duration HIGH_LATENCY_PROVIDER_TIMEOUT = Duration.ofSeconds(60);
     private static final Set<String> SYSTEM_INSTRUCTION_PROVIDERS = Set.of("minimax");
     private static final Set<String> REASONING_SPLIT_PROVIDERS = Set.of("minimax");
-    private static final Set<String> HIGH_TOKEN_BUDGET_PROVIDERS = Set.of("minimax", "glm", "claude", "qwen");
     private static final Set<String> HIGH_LATENCY_TIMEOUT_PROVIDERS = Set.of("minimax", "glm", "claude", "qwen");
-    private static final int MIN_STRUCTURED_OUTPUT_MAX_TOKENS = 640;
     private static final Set<String> LOCAL_OPTION_KEYS = Set.of(
             "apiKey",
             "apiKeyEnv",
@@ -29,8 +27,7 @@ public final class OpenAiCompatibleSupport {
             "organization",
             "project",
             "timeoutMillis",
-            "instructionRole",
-            "protocol"
+            "instructionRole"
     );
     private static final Set<String> RESERVED_REQUEST_KEYS = Set.of(
             "model",
@@ -68,6 +65,16 @@ public final class OpenAiCompatibleSupport {
         return URI.create(normalized.toLowerCase(Locale.ROOT).endsWith("/responses") ? normalized : normalized + "/responses");
     }
 
+    public static URI anthropicMessagesEndpointUri(String baseUrl) {
+        String normalized = baseUrl == null || baseUrl.isBlank() ? "https://api.anthropic.com/v1" : baseUrl;
+        normalized = normalized.endsWith("/") ? normalized.substring(0, normalized.length() - 1) : normalized;
+        return URI.create(normalized.toLowerCase(Locale.ROOT).endsWith("/messages") ? normalized : normalized + "/messages");
+    }
+
+    public static boolean usesResponsesProtocol(String protocol) {
+        return "OPENAI_RESPONSES".equalsIgnoreCase(protocol);
+    }
+
     public static String instructionRole(String provider, Map<String, Object> providerOptions) {
         String override = stringOption(providerOptions, "instructionRole");
         if (override != null) {
@@ -90,19 +97,6 @@ public final class OpenAiCompatibleSupport {
             effective.put("reasoning_split", true);
         }
         return effective;
-    }
-
-    public static int effectiveMaxTokens(String provider, Integer configuredMaxTokens) {
-        if (configuredMaxTokens == null) {
-            return HIGH_TOKEN_BUDGET_PROVIDERS.contains(providerId(provider))
-                    ? MIN_STRUCTURED_OUTPUT_MAX_TOKENS
-                    : 0;
-        }
-        if (HIGH_TOKEN_BUDGET_PROVIDERS.contains(providerId(provider))
-                && configuredMaxTokens < MIN_STRUCTURED_OUTPUT_MAX_TOKENS) {
-            return MIN_STRUCTURED_OUTPUT_MAX_TOKENS;
-        }
-        return configuredMaxTokens;
     }
 
     public static Duration effectiveTimeout(String provider, Object rawTimeoutMillis) {

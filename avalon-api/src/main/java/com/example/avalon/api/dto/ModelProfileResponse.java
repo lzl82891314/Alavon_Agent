@@ -10,9 +10,9 @@ public class ModelProfileResponse {
     private boolean editable;
     private boolean enabled;
     private String provider;
+    private String protocol;
     private String modelName;
     private Double temperature;
-    private Integer maxTokens;
     private Map<String, Object> providerOptions = new LinkedHashMap<>();
 
     public String getModelId() {
@@ -63,6 +63,14 @@ public class ModelProfileResponse {
         this.provider = provider;
     }
 
+    public String getProtocol() {
+        return protocol;
+    }
+
+    public void setProtocol(String protocol) {
+        this.protocol = protocol;
+    }
+
     public String getModelName() {
         return modelName;
     }
@@ -77,14 +85,6 @@ public class ModelProfileResponse {
 
     public void setTemperature(Double temperature) {
         this.temperature = temperature;
-    }
-
-    public Integer getMaxTokens() {
-        return maxTokens;
-    }
-
-    public void setMaxTokens(Integer maxTokens) {
-        this.maxTokens = maxTokens;
     }
 
     public Map<String, Object> getProviderOptions() {

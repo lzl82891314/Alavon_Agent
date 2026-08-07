@@ -131,9 +131,9 @@ public final class PersistenceEntityMapper {
                 entity.getModelId(),
                 entity.getDisplayName(),
                 entity.getProvider(),
+                entity.getProtocol(),
                 entity.getModelName(),
                 entity.getTemperature(),
-                entity.getMaxTokens(),
                 entity.getProviderOptionsJson(),
                 entity.isEnabled(),
                 entity.getCreatedAt(),
@@ -146,9 +146,9 @@ public final class PersistenceEntityMapper {
         entity.setModelId(record.modelId());
         entity.setDisplayName(record.displayName());
         entity.setProvider(record.provider());
+        entity.setProtocol(record.protocol());
         entity.setModelName(record.modelName());
         entity.setTemperature(record.temperature());
-        entity.setMaxTokens(record.maxTokens());
         entity.setProviderOptionsJson(record.providerOptionsJson());
         entity.setEnabled(record.enabled());
         entity.setCreatedAt(record.createdAt());

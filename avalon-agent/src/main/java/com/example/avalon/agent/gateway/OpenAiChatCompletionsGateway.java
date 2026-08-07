@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.function.Function;
 
 @Component
-public class OpenAiChatCompletionsGateway implements AgentGateway {
+public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
     private static final String GATEWAY_TYPE = "openai-compatible";
     private static final String DEFAULT_MODEL = "gpt-5.2";
     private static final String OPTIONAL_SECTION_WARNINGS = "optionalSectionWarnings";
@@ -50,6 +50,11 @@ public class OpenAiChatCompletionsGateway implements AgentGateway {
             }
             return apiKey;
         });
+    }
+
+    @Override
+    public String protocolId() {
+        return "OPENAI_COMPATIBLE_CHAT";
     }
 
     @Override
@@ -97,10 +102,6 @@ public class OpenAiChatCompletionsGateway implements AgentGateway {
                 .put("content", request.getPromptText());
         if (request.getTemperature() != null) {
             root.put("temperature", request.getTemperature());
-        }
-        int effectiveMaxTokens = OpenAiCompatibleSupport.effectiveMaxTokens(request.getProvider(), request.getMaxTokens());
-        if (effectiveMaxTokens > 0) {
-            root.put("max_completion_tokens", effectiveMaxTokens);
         }
         for (Map.Entry<String, Object> entry : providerOptions.entrySet()) {
             if (!OpenAiCompatibleSupport.shouldForwardProviderOption(entry.getKey())) {

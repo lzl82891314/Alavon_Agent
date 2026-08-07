@@ -13,9 +13,9 @@ public class AgentTurnRequest {
     private String roleId;
     private String modelId;
     private String provider;
+    private String protocol;
     private String modelName;
     private Double temperature;
-    private Integer maxTokens;
     private Map<String, Object> privateKnowledge = new LinkedHashMap<>();
     private Map<String, Object> publicState = new LinkedHashMap<>();
     private Map<String, Object> memory = new LinkedHashMap<>();
@@ -89,6 +89,14 @@ public class AgentTurnRequest {
         this.provider = provider;
     }
 
+    public String getProtocol() {
+        return protocol;
+    }
+
+    public void setProtocol(String protocol) {
+        this.protocol = protocol;
+    }
+
     public String getModelName() {
         return modelName;
     }
@@ -103,14 +111,6 @@ public class AgentTurnRequest {
 
     public void setTemperature(Double temperature) {
         this.temperature = temperature;
-    }
-
-    public Integer getMaxTokens() {
-        return maxTokens;
-    }
-
-    public void setMaxTokens(Integer maxTokens) {
-        this.maxTokens = maxTokens;
     }
 
     public Map<String, Object> getPrivateKnowledge() {
@@ -187,9 +187,9 @@ public class AgentTurnRequest {
         copy.setRoleId(roleId);
         copy.setModelId(modelId);
         copy.setProvider(provider);
+        copy.setProtocol(protocol);
         copy.setModelName(modelName);
         copy.setTemperature(temperature);
-        copy.setMaxTokens(maxTokens);
         copy.setPrivateKnowledge(privateKnowledge);
         copy.setPublicState(publicState);
         copy.setMemory(memory);

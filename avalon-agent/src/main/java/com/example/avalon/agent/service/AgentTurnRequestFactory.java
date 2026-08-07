@@ -27,9 +27,9 @@ public class AgentTurnRequestFactory {
         request.setRoleId(context.roleId());
         request.setModelId(modelProfile(agentConfig).getModelId());
         request.setProvider(provider(agentConfig));
+        request.setProtocol(modelProfile(agentConfig).getProtocol());
         request.setModelName(modelName(agentConfig));
         request.setTemperature(modelProfile(agentConfig).getTemperature());
-        request.setMaxTokens(modelProfile(agentConfig).getMaxTokens());
         request.setProviderOptions(modelProfile(agentConfig).getProviderOptions());
         request.setPrivateKnowledge(privateKnowledge(context));
         request.setPublicState(publicState(context));

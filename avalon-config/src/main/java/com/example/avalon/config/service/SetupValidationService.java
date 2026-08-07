@@ -130,14 +130,15 @@ public final class SetupValidationService {
         if (modelProfile.provider() == null || modelProfile.provider().isBlank()) {
             throw new ConfigValidationException("Model profile " + modelProfile.modelId() + " must define provider");
         }
+        if (modelProfile.protocol() == null || modelProfile.protocol().isBlank()) {
+            throw new ConfigValidationException("Model profile " + modelProfile.modelId()
+                    + " must define protocol");
+        }
         if (modelProfile.modelName() == null || modelProfile.modelName().isBlank()) {
             throw new ConfigValidationException("Model profile " + modelProfile.modelId() + " must define modelName");
         }
         if (modelProfile.temperature() != null && modelProfile.temperature() < 0.0) {
             throw new ConfigValidationException("Model profile " + modelProfile.modelId() + " must define non-negative temperature");
-        }
-        if (modelProfile.maxTokens() != null && modelProfile.maxTokens() <= 0) {
-            throw new ConfigValidationException("Model profile " + modelProfile.modelId() + " must define positive maxTokens");
         }
         validateModelProfileProviderOptions(modelProfile);
     }
