@@ -5,6 +5,7 @@ import com.example.avalon.agent.model.ModelProfile;
 import com.example.avalon.agent.model.PlayerAgentConfig;
 import com.example.avalon.core.game.model.PlayerTurnContext;
 import com.example.avalon.core.player.memory.VisiblePlayerInfo;
+import com.example.avalon.agent.strategy.RoleStrategyPlanner;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -16,6 +17,11 @@ import java.util.Map;
 @Component
 public class AgentTurnRequestFactory {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final RoleStrategyPlanner roleStrategyPlanner;
+
+    public AgentTurnRequestFactory(RoleStrategyPlanner roleStrategyPlanner) {
+        this.roleStrategyPlanner = roleStrategyPlanner;
+    }
 
     public AgentTurnRequest create(PlayerTurnContext context, PlayerAgentConfig agentConfig) {
         AgentTurnRequest request = new AgentTurnRequest();
@@ -34,6 +40,7 @@ public class AgentTurnRequestFactory {
         request.setPrivateKnowledge(privateKnowledge(context));
         request.setPublicState(publicState(context));
         request.setMemory(memory(context));
+        request.setStrategyContext(roleStrategyPlanner.plan(context));
         request.setAllowedActions(context.allowedActions().allowedActionTypes().stream().map(Enum::name).toList());
         request.setRulesSummary(context.rulesSummary());
         request.setOutputSchemaVersion(defaultString(agentConfig.getOutputSchemaVersion(), "v1"));

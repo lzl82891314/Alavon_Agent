@@ -17,7 +17,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Comparator;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /** Single entry point for advancing a game and committing action batches. */
 public final class DefaultGameCoordinator implements GameCoordinator {
@@ -26,16 +28,23 @@ public final class DefaultGameCoordinator implements GameCoordinator {
     private final PlayerControllerResolver controllers;
     private final TurnContextBuilder contexts;
     private final ActionCollector collector;
-    private final Map<String, Map<String, PlayerActionResult>> generatedResults = new ConcurrentHashMap<>();
+    private final Executor agentExecutor;
 
     public DefaultGameCoordinator(GameSessionService sessions, GameOrchestrator orchestrator,
                                   PlayerControllerResolver controllers, TurnContextBuilder contexts,
                                   ActionCollector collector) {
+        this(sessions, orchestrator, controllers, contexts, collector, Runnable::run);
+    }
+
+    public DefaultGameCoordinator(GameSessionService sessions, GameOrchestrator orchestrator,
+                                  PlayerControllerResolver controllers, TurnContextBuilder contexts,
+                                  ActionCollector collector, Executor agentExecutor) {
         this.sessions = sessions;
         this.orchestrator = orchestrator;
         this.controllers = controllers;
         this.contexts = contexts;
         this.collector = collector;
+        this.agentExecutor = agentExecutor == null ? Runnable::run : agentExecutor;
     }
 
     @Override
@@ -80,23 +89,34 @@ public final class DefaultGameCoordinator implements GameCoordinator {
     @Override public Optional<ActionBatch> findActiveBatch(String gameId) { return collector.findActive(gameId); }
 
     private ActionBatch dispatchAutomatic(GameRuntimeState state, ActionBatch batch) {
-        Map<String, PlayerActionResult> results = new ConcurrentHashMap<>();
-        batch.requiredPlayers().parallelStream().forEach(playerId -> {
+        Map<String, FrozenControllerInvocation> frozenInvocations = new LinkedHashMap<>();
+        for (String playerId : batch.requiredPlayers().stream().sorted().toList()) {
             PlayerRegistration player = state.playerById(playerId);
-            if (player.controllerType() == com.example.avalon.core.player.enums.PlayerControllerType.HUMAN) return;
+            if (player.controllerType() == com.example.avalon.core.player.enums.PlayerControllerType.HUMAN) continue;
             PlayerController controller = controllers.resolve(state, player);
-            PlayerActionResult result = controller.act(contexts.build(state, player));
-            results.put(playerId, result);
-        });
-        ActionBatch current = batch;
-        for (Map.Entry<String, PlayerActionResult> entry : results.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList()) {
-            current = collector.submit(new ActionSubmission(current.batchId(), entry.getKey(), entry.getValue().action(),
-                    current.batchId() + ":" + entry.getKey(), current.batchVersion(),
-                    current.batchId() + ":" + entry.getKey(), Instant.now())).batch();
+            frozenInvocations.put(playerId, new FrozenControllerInvocation(playerId, controller, contexts.build(state, player)));
         }
-        generatedResults.put(batch.batchId(), Map.copyOf(results));
+        List<GeneratedAction> results = frozenInvocations.values().stream()
+                .map(invocation -> CompletableFuture.supplyAsync(
+                        () -> new GeneratedAction(invocation.playerId(), invocation.controller().act(invocation.context())), agentExecutor))
+                .toList()
+                .stream()
+                .map(CompletableFuture::join)
+                .sorted(Comparator.comparing(GeneratedAction::playerId))
+                .toList();
+        ActionBatch current = batch;
+        for (GeneratedAction generated : results) {
+            current = collector.submit(new ActionSubmission(current.batchId(), generated.playerId(), generated.result().action(),
+                    current.batchId() + ":" + generated.playerId(), current.batchVersion(),
+                    current.batchId() + ":" + generated.playerId(), Instant.now(), generated.result())).batch();
+        }
         return current;
     }
+
+    private record FrozenControllerInvocation(String playerId, PlayerController controller,
+                                              com.example.avalon.core.game.model.PlayerTurnContext context) { }
+
+    private record GeneratedAction(String playerId, PlayerActionResult result) { }
 
     private void commit(GameRuntimeState state, ActionBatch batch) {
         if (batch.sourceGameVersion() != state.events().size()) {
@@ -104,10 +124,9 @@ public final class DefaultGameCoordinator implements GameCoordinator {
             throw new IllegalStateException("Action batch is stale");
         }
         Map<String, PlayerActionResult> results = new LinkedHashMap<>();
-        Map<String, PlayerActionResult> generated = generatedResults.remove(batch.batchId());
         batch.submissions().forEach((playerId, submission) -> results.put(playerId,
-                generated != null && generated.containsKey(playerId)
-                        ? generated.get(playerId)
+                submission.actionResult() != null
+                        ? submission.actionResult()
                         : new PlayerActionResult(null, submission.action(), null, null, Map.of("batchId", batch.batchId()))));
         orchestrator.applyCollectedActions(state, results);
         collector.markCommitted(batch.batchId());

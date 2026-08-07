@@ -103,32 +103,32 @@ public class PersistentGameApplicationService implements GameApplicationService 
     public GameSummaryResponse createGame(CreateGameRequest request) {
         String gameId = "game-" + UUID.randomUUID();
         GameRuntimeState state = gameOrchestrator.createGame(toGameSetup(gameId, request));
-        runtimePersistenceService.persist(state);
         commitCognition(state);
+        runtimePersistenceService.persist(state);
         return summary(state, "game created");
     }
 
     @Override
     public GameSummaryResponse startGame(String gameId) {
         GameRuntimeState state = gameOrchestrator.start(gameId);
-        runtimePersistenceService.persist(state);
         commitCognition(state);
+        runtimePersistenceService.persist(state);
         return summary(state, "game started");
     }
 
     @Override
     public GameSummaryResponse stepGame(String gameId) {
         GameRuntimeState state = gameCoordinator.advance(gameId).state();
-        runtimePersistenceService.persist(state);
         commitCognition(state);
+        runtimePersistenceService.persist(state);
         return summary(state, "game stepped");
     }
 
     @Override
     public GameSummaryResponse runGame(String gameId) {
         GameRuntimeState state = gameCoordinator.runUntilBlocked(gameId, 500).state();
-        runtimePersistenceService.persist(state);
         commitCognition(state);
+        runtimePersistenceService.persist(state);
         return summary(state, "game run-to-end completed");
     }
 
@@ -210,8 +210,8 @@ public class PersistentGameApplicationService implements GameApplicationService 
             gameCoordinator.advance(gameId);
         }
         GameRuntimeState state = requireState(gameId);
-        runtimePersistenceService.persist(state);
         commitCognition(state);
+        runtimePersistenceService.persist(state);
         return summary(state, result.message());
     }
 
@@ -232,18 +232,38 @@ public class PersistentGameApplicationService implements GameApplicationService 
     private void commitCognition(GameRuntimeState state) {
         if (state.events().isEmpty()) return;
         long sequence = state.events().get(state.events().size() - 1).seqNo();
-        List<ObservedEvent> publicEvents = state.events().stream()
-                .filter(event -> !"ROLE_ASSIGNED".equals(event.type()) && !"MISSION_ACTION_CAST".equals(event.type()))
-                .map(event -> new ObservedEvent(event.seqNo(), event.type(), CognitionScope.WORLD_FACT,
-                        event.actorId(), event.payload(), event.createdAt()))
-                .toList();
         for (PlayerRegistration player : state.players()) {
-            boolean alreadyCommitted = cognitionCommitService.findLatest(state.generatedGameId(), player.playerId())
-                    .map(draft -> draft.sourceSequence() >= sequence).orElse(false);
-            if (alreadyCommitted) continue;
-            ObservationBatch observations = new ObservationBatch(state.generatedGameId(), player.playerId(), sequence, publicEvents);
-            cognitionCommitService.commit(state.generatedGameId(), player.playerId(), cognitionEngine.propose(observations), sequence);
+            long cursor = cognitionCommitService.findLatest(state.generatedGameId(), player.playerId())
+                    .map(draft -> draft.sourceSequence()).orElse(0L);
+            if (cursor >= sequence) continue;
+            List<ObservedEvent> visibleDelta = state.events().stream()
+                    .filter(event -> event.seqNo() > cursor)
+                    .filter(this::isPublicCognitionEvent)
+                    .map(event -> new ObservedEvent(event.seqNo(), event.type(), CognitionScope.WORLD_FACT,
+                            event.actorId(), event.payload(), event.createdAt()))
+                    .toList();
+            ObservationBatch observations = new ObservationBatch(state.generatedGameId(), player.playerId(), sequence, visibleDelta);
+            var draft = cognitionEngine.propose(observations);
+            cognitionCommitService.commit(state.generatedGameId(), player.playerId(), draft, sequence);
+            mergeCognitionIntoRuntimeMemory(state, player.playerId(), draft);
         }
+    }
+
+    private boolean isPublicCognitionEvent(com.example.avalon.runtime.model.GameEvent event) {
+        return !"ROLE_ASSIGNED".equals(event.type()) && !"MISSION_ACTION_CAST".equals(event.type());
+    }
+
+    private void mergeCognitionIntoRuntimeMemory(GameRuntimeState state,
+                                                  String playerId,
+                                                  com.example.avalon.agent.cognition.PrivateCognitionDraft draft) {
+        Map<String, Object> memory = state.memoryOf(playerId);
+        memory.put("strategyMode", draft.strategy().objective());
+        memory.put("lastSummary", String.join("; ", draft.communication().talkingPoints()));
+        memory.put("suspicionScores", draft.strategy().riskByPlayer());
+        memory.put("cognitionBasedOnSequence", draft.sourceSequence());
+        memory.put("cognitionCommunicationPlan", Map.of(
+                "speechAct", draft.communication().speechAct(),
+                "talkingPoints", draft.communication().talkingPoints()));
     }
 
     private GameSetup toGameSetup(String gameId, CreateGameRequest request) {

@@ -1,6 +1,7 @@
 package com.example.avalon.runtime.coordination;
 
 import com.example.avalon.core.game.model.PlayerAction;
+import com.example.avalon.core.game.model.PlayerActionResult;
 
 import java.time.Instant;
 
@@ -11,8 +12,13 @@ public record ActionSubmission(
         String idempotencyKey,
         long expectedBatchVersion,
         String controllerExecutionId,
-        Instant submittedAt
+        Instant submittedAt,
+        PlayerActionResult actionResult
 ) {
+    public ActionSubmission(String batchId, String playerId, PlayerAction action, String idempotencyKey,
+                            long expectedBatchVersion, String controllerExecutionId, Instant submittedAt) {
+        this(batchId, playerId, action, idempotencyKey, expectedBatchVersion, controllerExecutionId, submittedAt, null);
+    }
     public ActionSubmission {
         if (batchId == null || batchId.isBlank()) {
             throw new IllegalArgumentException("batchId must not be blank");

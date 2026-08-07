@@ -19,6 +19,7 @@ public class AgentTurnRequest {
     private Map<String, Object> privateKnowledge = new LinkedHashMap<>();
     private Map<String, Object> publicState = new LinkedHashMap<>();
     private Map<String, Object> memory = new LinkedHashMap<>();
+    private Map<String, Object> strategyContext = new LinkedHashMap<>();
     private List<String> allowedActions = List.of();
     private String rulesSummary;
     private String outputSchemaVersion;
@@ -137,6 +138,14 @@ public class AgentTurnRequest {
         this.memory = memory == null ? new LinkedHashMap<>() : new LinkedHashMap<>(memory);
     }
 
+    public Map<String, Object> getStrategyContext() {
+        return strategyContext;
+    }
+
+    public void setStrategyContext(Map<String, Object> strategyContext) {
+        this.strategyContext = strategyContext == null ? new LinkedHashMap<>() : new LinkedHashMap<>(strategyContext);
+    }
+
     public List<String> getAllowedActions() {
         return allowedActions;
     }
@@ -193,6 +202,7 @@ public class AgentTurnRequest {
         copy.setPrivateKnowledge(privateKnowledge);
         copy.setPublicState(publicState);
         copy.setMemory(memory);
+        copy.setStrategyContext(strategyContext);
         copy.setAllowedActions(allowedActions);
         copy.setRulesSummary(rulesSummary);
         copy.setOutputSchemaVersion(outputSchemaVersion);

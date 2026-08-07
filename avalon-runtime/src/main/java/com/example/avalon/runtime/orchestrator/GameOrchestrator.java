@@ -223,7 +223,13 @@ public class GameOrchestrator {
                     }
                     state.putMissionChoice(player.seatNo(), action.choice());
                 }
-                state.appendEvent("MISSION_RESULT_REVEALED", GamePhase.MISSION_ACTION, "SYSTEM", Map.of("choices", state.currentMissionChoices()));
+                long failCount = state.currentMissionChoices().values().stream()
+                        .filter(choice -> choice == MissionChoice.FAIL)
+                        .count();
+                state.appendEvent("MISSION_RESULT_REVEALED", GamePhase.MISSION_ACTION, "SYSTEM", Map.of(
+                        "roundNo", state.roundNo(),
+                        "result", failCount > 0 ? "FAILED" : "SUCCESS",
+                        "failCount", failCount));
                 state.phase(GamePhase.MISSION_RESOLUTION);
             }
             case ASSASSINATION -> {

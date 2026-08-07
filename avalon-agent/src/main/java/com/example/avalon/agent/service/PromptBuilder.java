@@ -23,6 +23,7 @@ public class PromptBuilder {
                 规则摘要：%s
                 私有情报：%s
                 记忆：%s
+                当前角色策略：%s
                 公开局面：%s
                 输出 schema 版本：%s
                 只返回一个 JSON 对象，不要输出 Markdown、代码块、<think>、项目符号或任何解释文字。
@@ -50,6 +51,7 @@ public class PromptBuilder {
                 request.getRulesSummary(),
                 privateKnowledgeText(request.getPrivateKnowledge()),
                 request.getMemory(),
+                request.getStrategyContext(),
                 request.getPublicState(),
                 request.getOutputSchemaVersion()
         ).strip());

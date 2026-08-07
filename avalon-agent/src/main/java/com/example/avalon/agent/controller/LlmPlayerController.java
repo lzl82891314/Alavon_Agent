@@ -146,6 +146,7 @@ public class LlmPlayerController implements PlayerController {
         payload.put("privateKnowledge", request.getPrivateKnowledge());
         payload.put("publicState", request.getPublicState());
         payload.put("memory", request.getMemory());
+        payload.put("strategyContext", request.getStrategyContext());
         payload.put("promptText", request.getPromptText());
         payload.put("outputSchemaVersion", request.getOutputSchemaVersion());
         return payload;

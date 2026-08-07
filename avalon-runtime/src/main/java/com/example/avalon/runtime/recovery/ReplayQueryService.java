@@ -4,28 +4,38 @@ import com.example.avalon.persistence.model.AuditRecord;
 import com.example.avalon.persistence.model.GameEventRecord;
 import com.example.avalon.persistence.store.AuditRecordStore;
 import com.example.avalon.persistence.store.GameEventStore;
+import com.example.avalon.runtime.disclosure.DisclosurePolicy;
+import com.example.avalon.runtime.disclosure.DefaultDisclosurePolicy;
 
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class ReplayQueryService {
     private final GameEventStore gameEventStore;
     private final AuditRecordStore auditRecordStore;
+    private final DisclosurePolicy disclosurePolicy;
 
     public ReplayQueryService(GameEventStore gameEventStore, AuditRecordStore auditRecordStore) {
+        this(gameEventStore, auditRecordStore, new DefaultDisclosurePolicy());
+    }
+
+    public ReplayQueryService(GameEventStore gameEventStore, AuditRecordStore auditRecordStore,
+                              DisclosurePolicy disclosurePolicy) {
         this.gameEventStore = gameEventStore;
         this.auditRecordStore = auditRecordStore;
+        this.disclosurePolicy = disclosurePolicy;
     }
 
     public List<GameEventRecord> events(String gameId) {
-        return gameEventStore.findByGameId(gameId);
+        return publicEvents(gameId);
     }
 
     public List<ReplayProjectionStep> replay(String gameId) {
-        return gameEventStore.findByGameId(gameId).stream()
+        return publicEvents(gameId).stream()
                 .sorted(Comparator.comparingLong(GameEventRecord::seqNo))
                 .map(this::toReplayStep)
                 .toList();
@@ -33,6 +43,13 @@ public class ReplayQueryService {
 
     public List<AuditRecord> audit(String gameId) {
         return auditRecordStore.findByGameId(gameId);
+    }
+
+    private List<GameEventRecord> publicEvents(String gameId) {
+        return gameEventStore.findByGameId(gameId).stream()
+                .map(disclosurePolicy::publicEvent)
+                .flatMap(Optional::stream)
+                .toList();
     }
 
     private ReplayProjectionStep toReplayStep(GameEventRecord record) {

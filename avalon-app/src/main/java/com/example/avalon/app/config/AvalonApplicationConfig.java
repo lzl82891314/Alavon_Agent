@@ -34,6 +34,7 @@ import com.example.avalon.runtime.persistence.RuntimePersistenceService;
 import com.example.avalon.runtime.persistence.RuntimeStateCodec;
 import com.example.avalon.runtime.recovery.RecoveryService;
 import com.example.avalon.runtime.recovery.ReplayQueryService;
+import com.example.avalon.runtime.disclosure.DefaultDisclosurePolicy;
 import com.example.avalon.runtime.service.GameSessionService;
 import com.example.avalon.runtime.service.ResolvedLlmConfigInitializer;
 import com.example.avalon.runtime.service.TurnContextBuilder;
@@ -47,6 +48,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Configuration
 public class AvalonApplicationConfig {
@@ -148,7 +151,7 @@ public class AvalonApplicationConfig {
 
     @Bean
     ReplayQueryService replayQueryService(GameEventStore gameEventStore, AuditRecordStore auditRecordStore) {
-        return new ReplayQueryService(gameEventStore, auditRecordStore);
+        return new ReplayQueryService(gameEventStore, auditRecordStore, new DefaultDisclosurePolicy());
     }
 
     @Bean
@@ -185,9 +188,15 @@ public class AvalonApplicationConfig {
                                     GameOrchestrator gameOrchestrator,
                                     PlayerControllerResolver playerControllerResolver,
                                     TurnContextBuilder turnContextBuilder,
-                                    ActionCollector actionCollector) {
+                                    ActionCollector actionCollector,
+                                    ExecutorService avalonAgentExecutor) {
         return new DefaultGameCoordinator(gameSessionService, gameOrchestrator, playerControllerResolver,
-                turnContextBuilder, actionCollector);
+                turnContextBuilder, actionCollector, avalonAgentExecutor);
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    ExecutorService avalonAgentExecutor(@Value("${avalon.agent.parallelism:5}") int parallelism) {
+        return Executors.newFixedThreadPool(Math.max(1, parallelism));
     }
 
     @Bean
