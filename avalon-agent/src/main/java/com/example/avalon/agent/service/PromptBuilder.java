@@ -1,187 +1,121 @@
 package com.example.avalon.agent.service;
 
-import com.example.avalon.agent.gateway.OpenAiCompatibleSupport;
 import com.example.avalon.agent.model.AgentTurnRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
+/** Renders a strategic decision contract, not a role-play form. */
 @Component
-public class PromptBuilder {
+public final class PromptBuilder {
+    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+
     public String build(AgentTurnRequest request) {
-        StringBuilder builder = new StringBuilder("""
-                你正在扮演一名阿瓦隆玩家。
-                请严格代入当前玩家身份，只依据你可见的信息行动。
-                游戏ID：%s
-                轮次：%s
-                阶段：%s
-                玩家：%s（座位 %s，身份 %s）
-                可执行动作：%s
-                规则摘要：%s
-                私有情报：%s
-                记忆：%s
-                当前角色策略：%s
-                公开局面：%s
-                输出 schema 版本：%s
-                只返回一个 JSON 对象，不要输出 Markdown、代码块、<think>、项目符号或任何解释文字。
-                最终输出的第一个字符必须是 {，最后一个字符必须是 }。
-                优先返回最小合法 JSON，并把第一层键按 action、publicSpeech、privateThought、auditReason、memoryUpdate 的顺序写出。
-                action 必填，且必须是当前阶段合法的结构化动作 JSON。
-                publicSpeech 只有在当前阶段需要公开发言时才提供；如果提供，只写 1 到 2 句简短中文。
-                privateThought 可以省略或写 null；如果提供，只写一句极短中文，不要长篇分析。
-                auditReason 和 memoryUpdate 默认省略；只有在确有必要时才提供。
-                如果提供 auditReason，它必须是 JSON 对象，字段只允许 goal、reasonSummary、confidence、beliefs。
-                如果提供 memoryUpdate，它必须是 JSON 对象，字段只允许 suspicionDelta、trustDelta、observationsToAdd、commitmentsToAdd、inferredFactsToAdd、strategyMode、lastSummary。
-                关于私有知识的强规则：
-                - 只有 exactRoleId 明确告诉你的身份，才能当作确定事实写出来。
-                - 如果某位玩家只有 candidateRoleIds，你只知道他属于候选集合，不知道真实身份。
-                - 对 candidateRoleIds 的描述必须使用“怀疑 / 可能 / 更像 / 倾向 / 猜测”等不确定表达。
-                - 绝不能在 privateThought 或 auditReason.reasonSummary 里写出“P5是梅林”“P3就是莫甘娜”这类确定断言。
+        return """
+                你是阿瓦隆对局中的独立战略 Agent。目标不是完成流程，而是在信息不完全和其他玩家可能欺骗的条件下，为自己的阵营争取胜利。
+
+                ## 权限和事实边界
+                - 只能使用本请求中的私有知识、公开快照、公开观察增量和自己的既有认知状态。
+                - WORLD_FACT 是规则引擎确认的事实；PUBLIC_CLAIM 只是某人的公开主张，可能错误或故意欺骗。
+                - 不得假设你能读取其他玩家的私有记忆、身份、任务票或模型响应。
+                - 可以保留 UNKNOWN。没有新证据时不要大幅改变概率。
+                - 游戏内隐瞒和误导仅在角色策略允许的 deceptionIntent 范围内合法。
+
+                ## 当前身份与规则
+                gameId: %s
+                playerId: %s
+                seatNo: %s
+                roleId: %s
+                roundNo: %s
+                phase: %s
+                rules: %s
+                allowedActions: %s
+                privateKnowledge: %s
+
+                ## 当前公共状态
+                %s
+
+                ## 自上次成功行动后的完整可见增量
+                sequenceRange: (%d, %d]
+                %s
+
+                ## 你的私有跨回合认知
+                %s
+
+                ## 角色策略与差异化参数
+                %s
+
+                ## 当前讨论指令
+                %s
+
+                ## 决策要求
+                1. 先比较新事件与既有信念、承诺和叙事，识别支持证据、反证和矛盾。
+                2. roleBeliefs 中的值表示玩家属于邪恶阵营的概率，范围必须为 0 到 1；显著变化必须引用本请求中真实可见的 sequence。
+                3. strategyState 必须记录 mode、objective、unresolvedQuestions、publicCommitments、coverStory、deceptionIntent 和 consistencyRisks。
+                4. communicationPlan 必须说明 speechAct、desiredAudienceBeliefs、evidenceToMention、evidenceToWithhold 和 publicMessage。
+                5. 公开表达必须服务于策略；不要复述规则、回合进度或泛泛地说“继续观察”。
+                6. 如果当前是 TARGETED_RESPONSES，必须回答讨论指令指定的质疑；如果是 LEADER_SYNTHESIS，必须综合争议后给出队伍判断。
+                7. 不输出原始思维链。只输出下面的结构化决策产物和动作。
+
+                ## 输出契约
+                只返回一个 JSON 对象：
+                {
+                  "memoryUpdate": {
+                    "roleBeliefs": {"playerId": 0.0},
+                    "evidenceReferences": [0],
+                    "strategyState": {
+                      "mode": "...",
+                      "objective": "...",
+                      "unresolvedQuestions": [],
+                      "publicCommitments": [],
+                      "coverStory": {},
+                      "deceptionIntent": "NONE",
+                      "consistencyRisks": []
+                    },
+                    "communicationPlan": {
+                      "speechAct": "...",
+                      "desiredAudienceBeliefs": {},
+                      "evidenceToMention": [],
+                      "evidenceToWithhold": [],
+                      "publicMessage": "..."
+                    },
+                    "commitmentsToAdd": [],
+                    "strategyMode": "...",
+                    "lastSummary": "..."
+                  },
+                  "action": %s,
+                  "publicSpeech": "仅在公开表达适用时填写，并与 action.speechText 一致"
+                }
+
+                memoryUpdate 是战略回合的必填字段。evidenceReferences 只能引用 sequenceRange 内或既有记忆中存在的公开事件。
                 """.formatted(
-                request.getGameId(),
-                request.getRoundNo(),
-                request.getPhase(),
-                request.getPlayerId(),
-                request.getSeatNo(),
-                request.getRoleId(),
-                request.getAllowedActions(),
-                request.getRulesSummary(),
-                privateKnowledgeText(request.getPrivateKnowledge()),
-                request.getMemory(),
-                request.getStrategyContext(),
-                request.getPublicState(),
-                request.getOutputSchemaVersion()
-        ).strip());
-        builder.append(System.lineSeparator())
-                .append("最小合法示例：")
-                .append(System.lineSeparator())
-                .append(exampleJson(request.getAllowedActions()))
-                .append(System.lineSeparator())
-                .append("如果确实需要提供 memoryUpdate，最小合法示例：")
-                .append(System.lineSeparator())
-                .append("{\"action\":{\"actionType\":\"PUBLIC_SPEECH\",\"speechText\":\"我先给出公开看法。\"},\"publicSpeech\":\"我先给出公开看法。\",\"memoryUpdate\":{\"observationsToAdd\":[\"记录一条新观察\"],\"strategyMode\":\"BALANCED\",\"lastSummary\":\"保持低风险验证。\"}}");
-        if ("minimax".equals(OpenAiCompatibleSupport.providerId(request.getProvider()))) {
-            builder.append(System.lineSeparator())
-                    .append("""
-                            兼容要求：
-                            - 不要输出项目符号
-                            - action.actionType 只能从当前 allowedActions 中选择
-                            """.strip());
-        }
-        return builder.toString();
+                request.getGameId(), request.getPlayerId(), request.getSeatNo(), request.getRoleId(),
+                request.getRoundNo(), request.getPhase(), request.getRulesSummary(), json(request.getAllowedActions()),
+                json(request.getPrivateKnowledge()), json(request.getPublicState()),
+                request.getObservationFromSequence(), request.getObservationToSequence(), json(request.getObservationDelta()),
+                json(request.getMemory()), json(request.getStrategyContext()), json(request.getDiscussionDirective()),
+                actionContract(request.getAllowedActions())).strip();
     }
 
-    private String privateKnowledgeText(Map<String, Object> privateKnowledge) {
-        if (privateKnowledge == null || privateKnowledge.isEmpty()) {
-            return "无";
-        }
-        StringBuilder builder = new StringBuilder();
-        String camp = stringValue(privateKnowledge.get("camp"));
-        if (camp != null) {
-            builder.append(System.lineSeparator())
-                    .append("阵营：")
-                    .append(camp);
-        }
-        Object rawVisiblePlayers = privateKnowledge.get("visiblePlayers");
-        if (rawVisiblePlayers instanceof Collection<?> visiblePlayers && !visiblePlayers.isEmpty()) {
-            builder.append(System.lineSeparator()).append("可见玩家：");
-            for (Object rawVisiblePlayer : visiblePlayers) {
-                if (!(rawVisiblePlayer instanceof Map<?, ?> visiblePlayer)) {
-                    continue;
-                }
-                String playerId = stringValue(visiblePlayer.get("playerId"));
-                if (playerId == null) {
-                    continue;
-                }
-                String displayName = stringValue(visiblePlayer.get("displayName"));
-                String exactRoleId = stringValue(visiblePlayer.get("exactRoleId"));
-                List<String> candidateRoleIds = stringList(visiblePlayer.get("candidateRoleIds"));
-                builder.append(System.lineSeparator())
-                        .append("- ")
-                        .append(playerLabel(playerId, displayName))
-                        .append("：");
-                if (exactRoleId != null) {
-                    builder.append("已知真实身份 ")
-                            .append(exactRoleId)
-                            .append("。");
-                    continue;
-                }
-                if (!candidateRoleIds.isEmpty()) {
-                    builder.append("候选身份 ")
-                            .append(candidateRoleIds)
-                            .append("。这只代表候选集合，不代表你已知真实身份。");
-                    continue;
-                }
-                String visibleCamp = stringValue(visiblePlayer.get("camp"));
-                if (visibleCamp != null) {
-                    builder.append("已知阵营 ")
-                            .append(visibleCamp)
-                            .append("。");
-                    continue;
-                }
-                builder.append("没有额外身份确定信息。");
-            }
-        }
-        List<String> notes = stringList(privateKnowledge.get("notes"));
-        if (!notes.isEmpty()) {
-            builder.append(System.lineSeparator()).append("备注：");
-            for (String note : notes) {
-                builder.append(System.lineSeparator())
-                        .append("- ")
-                        .append(note);
-            }
-        }
-        return builder.length() == 0 ? "无" : builder.toString().strip();
-    }
-
-    private String exampleJson(List<String> allowedActions) {
-        String primaryAction = allowedActions == null || allowedActions.isEmpty()
-                ? "PUBLIC_SPEECH"
-                : allowedActions.get(0);
-        return switch (primaryAction) {
-            case "TEAM_PROPOSAL" -> """
-                    {"action":{"actionType":"TEAM_PROPOSAL","selectedPlayerIds":["P1","P2"]},"publicSpeech":"我先提一个可验证的队伍。","privateThought":"先做一轮低风险验证。"}
-                    """.strip();
-            case "TEAM_VOTE" -> """
-                    {"action":{"actionType":"TEAM_VOTE","vote":"APPROVE"},"publicSpeech":"我暂时支持这支队伍。","privateThought":"先看这一轮投票。"}
-                    """.strip();
-            case "MISSION_ACTION" -> """
-                    {"action":{"actionType":"MISSION_ACTION","choice":"SUCCESS"},"privateThought":"先执行当前任务动作。"}
-                    """.strip();
-            case "ASSASSINATION" -> """
-                    {"action":{"actionType":"ASSASSINATION","targetPlayerId":"P1"},"publicSpeech":"我现在给出刺杀目标。","privateThought":"优先锁定最像梅林的玩家。"}
-                    """.strip();
-            default -> """
-                    {"action":{"actionType":"PUBLIC_SPEECH","speechText":"我先给出公开看法。"},"publicSpeech":"我先给出公开看法。","privateThought":"先收集一轮信息。"}
-                    """.strip();
+    private String actionContract(List<String> allowedActions) {
+        String type = allowedActions == null || allowedActions.size() != 1 ? null : allowedActions.get(0);
+        if (type == null) return "{\"actionType\": \"one of allowedActions\"}";
+        return switch (type) {
+            case "PUBLIC_SPEECH" -> "{\"actionType\":\"PUBLIC_SPEECH\",\"speechText\":\"...\",\"speechAct\":\"allowed speech act\",\"mentions\":[],\"replyToEventSequences\":[]}";
+            case "TEAM_PROPOSAL" -> "{\"actionType\":\"TEAM_PROPOSAL\",\"selectedPlayerIds\":[\"exact required team size\"]}";
+            case "TEAM_VOTE" -> "{\"actionType\":\"TEAM_VOTE\",\"vote\":\"APPROVE or REJECT\"}";
+            case "MISSION_ACTION" -> "{\"actionType\":\"MISSION_ACTION\",\"choice\":\"SUCCESS or FAIL when role permits\"}";
+            case "ASSASSINATION" -> "{\"actionType\":\"ASSASSINATION\",\"targetPlayerId\":\"eligible player\"}";
+            default -> "{\"actionType\":\"" + type + "\"}";
         };
     }
 
-    private String playerLabel(String playerId, String displayName) {
-        if (displayName == null || Objects.equals(displayName, playerId)) {
-            return playerId;
+    private String json(Object value) {
+        try {
+            return json.writerWithDefaultPrettyPrinter().writeValueAsString(value);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Cannot render strategic prompt context", exception);
         }
-        return playerId + "/" + displayName;
-    }
-
-    private List<String> stringList(Object value) {
-        if (!(value instanceof Collection<?> collection)) {
-            return List.of();
-        }
-        return collection.stream()
-                .map(this::stringValue)
-                .filter(Objects::nonNull)
-                .toList();
-    }
-
-    private String stringValue(Object value) {
-        if (value == null) {
-            return null;
-        }
-        String text = String.valueOf(value);
-        return text.isBlank() ? null : text;
     }
 }

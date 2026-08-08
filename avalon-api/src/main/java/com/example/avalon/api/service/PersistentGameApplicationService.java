@@ -33,11 +33,6 @@ import com.example.avalon.core.game.model.MissionAction;
 import com.example.avalon.core.game.model.AssassinationAction;
 import com.example.avalon.core.game.enums.MissionChoice;
 import com.example.avalon.core.game.enums.VoteChoice;
-import com.example.avalon.agent.cognition.CognitionCommitService;
-import com.example.avalon.agent.cognition.CognitionScope;
-import com.example.avalon.agent.cognition.DeterministicStrategicCognitionEngine;
-import com.example.avalon.agent.cognition.ObservationBatch;
-import com.example.avalon.agent.cognition.ObservedEvent;
 import com.example.avalon.runtime.persistence.RuntimePersistenceService;
 import com.example.avalon.runtime.recovery.RecoveryResult;
 import com.example.avalon.runtime.recovery.RecoveryService;
@@ -55,6 +50,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 @Service
 public class PersistentGameApplicationService implements GameApplicationService {
@@ -69,8 +68,6 @@ public class PersistentGameApplicationService implements GameApplicationService 
     private final SeedGenerator seedGenerator;
     private final ObjectMapper objectMapper;
     private final GameCoordinator gameCoordinator;
-    private final CognitionCommitService cognitionCommitService;
-    private final DeterministicStrategicCognitionEngine cognitionEngine = new DeterministicStrategicCognitionEngine();
 
     public PersistentGameApplicationService(
             AvalonConfigRegistry configRegistry,
@@ -82,8 +79,7 @@ public class PersistentGameApplicationService implements GameApplicationService 
             TurnContextBuilder turnContextBuilder,
             ModelProfileCatalogService modelProfileCatalogService,
             SeedGenerator seedGenerator,
-            GameCoordinator gameCoordinator,
-            CognitionCommitService cognitionCommitService
+            GameCoordinator gameCoordinator
     ) {
         this.configRegistry = configRegistry;
         this.gameOrchestrator = gameOrchestrator;
@@ -96,14 +92,12 @@ public class PersistentGameApplicationService implements GameApplicationService 
         this.seedGenerator = seedGenerator;
         this.objectMapper = new ObjectMapper().findAndRegisterModules();
         this.gameCoordinator = gameCoordinator;
-        this.cognitionCommitService = cognitionCommitService;
     }
 
     @Override
     public GameSummaryResponse createGame(CreateGameRequest request) {
         String gameId = "game-" + UUID.randomUUID();
         GameRuntimeState state = gameOrchestrator.createGame(toGameSetup(gameId, request));
-        commitCognition(state);
         runtimePersistenceService.persist(state);
         return summary(state, "game created");
     }
@@ -111,7 +105,6 @@ public class PersistentGameApplicationService implements GameApplicationService 
     @Override
     public GameSummaryResponse startGame(String gameId) {
         GameRuntimeState state = gameOrchestrator.start(gameId);
-        commitCognition(state);
         runtimePersistenceService.persist(state);
         return summary(state, "game started");
     }
@@ -119,7 +112,6 @@ public class PersistentGameApplicationService implements GameApplicationService 
     @Override
     public GameSummaryResponse stepGame(String gameId) {
         GameRuntimeState state = gameCoordinator.advance(gameId).state();
-        commitCognition(state);
         runtimePersistenceService.persist(state);
         return summary(state, "game stepped");
     }
@@ -127,7 +119,6 @@ public class PersistentGameApplicationService implements GameApplicationService 
     @Override
     public GameSummaryResponse runGame(String gameId) {
         GameRuntimeState state = gameCoordinator.runUntilBlocked(gameId, 500).state();
-        commitCognition(state);
         runtimePersistenceService.persist(state);
         return summary(state, "game run-to-end completed");
     }
@@ -197,7 +188,10 @@ public class PersistentGameApplicationService implements GameApplicationService 
     }
 
     @Override
-    public GameSummaryResponse submitPlayerAction(String gameId, String playerId, GameActionSubmissionRequest request) {
+    public GameSummaryResponse submitPlayerAction(String gameId, String playerId, String playerToken,
+                                                  GameActionSubmissionRequest request) {
+        GameRuntimeState state = requireState(gameId);
+        authorizeHumanAction(state, playerId, playerToken);
         ActionBatch batch = gameCoordinator.findActiveBatch(gameId)
                 .orElseThrow(() -> new IllegalStateException("No active action batch"));
         PlayerAction action = parseAction(request);
@@ -209,10 +203,25 @@ public class PersistentGameApplicationService implements GameApplicationService 
         if (result.batch().isComplete()) {
             gameCoordinator.advance(gameId);
         }
-        GameRuntimeState state = requireState(gameId);
-        commitCognition(state);
+        state = requireState(gameId);
         runtimePersistenceService.persist(state);
         return summary(state, result.message());
+    }
+
+    private void authorizeHumanAction(GameRuntimeState state, String playerId, String playerToken) {
+        PlayerRegistration player = state.playerById(playerId);
+        if (player.controllerType() != PlayerControllerType.HUMAN) {
+            throw new SecurityException("External actions are only accepted for HUMAN players");
+        }
+        Object expected = player.controllerConfig().get("actionTokenHash");
+        if (!(expected instanceof String expectedHash) || playerToken == null || playerToken.isBlank()) {
+            throw new SecurityException("Missing player action credential");
+        }
+        String actualHash = actionTokenHash(state.generatedGameId(), playerId, playerToken);
+        if (!MessageDigest.isEqual(expectedHash.getBytes(StandardCharsets.US_ASCII),
+                actualHash.getBytes(StandardCharsets.US_ASCII))) {
+            throw new SecurityException("Invalid player action credential");
+        }
     }
 
     private PlayerAction parseAction(GameActionSubmissionRequest request) {
@@ -220,50 +229,17 @@ public class PersistentGameApplicationService implements GameApplicationService 
         String type = request.getActionType().trim().toUpperCase();
         Map<String, Object> payload = request.getPayload();
         return switch (type) {
-            case "PUBLIC_SPEECH" -> new PublicSpeechAction(String.valueOf(payload.getOrDefault("speech", payload.getOrDefault("speechText", ""))));
+            case "PUBLIC_SPEECH" -> new PublicSpeechAction(
+                    String.valueOf(payload.getOrDefault("speech", payload.getOrDefault("speechText", ""))),
+                    String.valueOf(payload.getOrDefault("speechAct", "STATE_OPINION")),
+                    objectMapper.convertValue(payload.getOrDefault("mentions", List.of()), new TypeReference<List<String>>() { }),
+                    objectMapper.convertValue(payload.getOrDefault("replyToEventSequences", List.of()), new TypeReference<List<Long>>() { }));
             case "TEAM_PROPOSAL" -> new TeamProposalAction(objectMapper.convertValue(payload.getOrDefault("selectedPlayerIds", List.of()), new TypeReference<List<String>>() { }));
             case "TEAM_VOTE" -> new TeamVoteAction(VoteChoice.valueOf(String.valueOf(payload.get("vote")).toUpperCase()));
             case "MISSION_ACTION" -> new MissionAction(MissionChoice.valueOf(String.valueOf(payload.get("choice")).toUpperCase()));
             case "ASSASSINATION" -> new AssassinationAction(String.valueOf(payload.get("targetPlayerId")));
             default -> throw new IllegalArgumentException("Unsupported actionType: " + type);
         };
-    }
-
-    private void commitCognition(GameRuntimeState state) {
-        if (state.events().isEmpty()) return;
-        long sequence = state.events().get(state.events().size() - 1).seqNo();
-        for (PlayerRegistration player : state.players()) {
-            long cursor = cognitionCommitService.findLatest(state.generatedGameId(), player.playerId())
-                    .map(draft -> draft.sourceSequence()).orElse(0L);
-            if (cursor >= sequence) continue;
-            List<ObservedEvent> visibleDelta = state.events().stream()
-                    .filter(event -> event.seqNo() > cursor)
-                    .filter(this::isPublicCognitionEvent)
-                    .map(event -> new ObservedEvent(event.seqNo(), event.type(), CognitionScope.WORLD_FACT,
-                            event.actorId(), event.payload(), event.createdAt()))
-                    .toList();
-            ObservationBatch observations = new ObservationBatch(state.generatedGameId(), player.playerId(), sequence, visibleDelta);
-            var draft = cognitionEngine.propose(observations);
-            cognitionCommitService.commit(state.generatedGameId(), player.playerId(), draft, sequence);
-            mergeCognitionIntoRuntimeMemory(state, player.playerId(), draft);
-        }
-    }
-
-    private boolean isPublicCognitionEvent(com.example.avalon.runtime.model.GameEvent event) {
-        return !"ROLE_ASSIGNED".equals(event.type()) && !"MISSION_ACTION_CAST".equals(event.type());
-    }
-
-    private void mergeCognitionIntoRuntimeMemory(GameRuntimeState state,
-                                                  String playerId,
-                                                  com.example.avalon.agent.cognition.PrivateCognitionDraft draft) {
-        Map<String, Object> memory = state.memoryOf(playerId);
-        memory.put("strategyMode", draft.strategy().objective());
-        memory.put("lastSummary", String.join("; ", draft.communication().talkingPoints()));
-        memory.put("suspicionScores", draft.strategy().riskByPlayer());
-        memory.put("cognitionBasedOnSequence", draft.sourceSequence());
-        memory.put("cognitionCommunicationPlan", Map.of(
-                "speechAct", draft.communication().speechAct(),
-                "talkingPoints", draft.communication().talkingPoints()));
     }
 
     private GameSetup toGameSetup(String gameId, CreateGameRequest request) {
@@ -273,12 +249,23 @@ public class PersistentGameApplicationService implements GameApplicationService 
         int playerIndex = 1;
         for (CreateGameRequest.PlayerSlotRequest playerRequest : request.getPlayers()) {
             PlayerControllerType controllerType = PlayerControllerType.valueOf(Optional.ofNullable(playerRequest.getControllerType()).orElse("SCRIPTED"));
+            String playerId = "P" + playerIndex;
+            Map<String, Object> controllerConfig = playerRequest.getAgentConfig() == null
+                    ? new LinkedHashMap<>()
+                    : objectMapper.convertValue(playerRequest.getAgentConfig(), new TypeReference<Map<String, Object>>() { });
+            if (controllerType == PlayerControllerType.HUMAN) {
+                String actionToken = playerRequest.getActionToken();
+                if (actionToken == null || actionToken.length() < 24) {
+                    throw new IllegalArgumentException("HUMAN players require an actionToken of at least 24 characters");
+                }
+                controllerConfig.put("actionTokenHash", actionTokenHash(gameId, playerId, actionToken));
+            }
             players.add(new PlayerRegistration(
-                    "P" + playerIndex,
+                    playerId,
                     Optional.ofNullable(playerRequest.getSeatNo()).orElse(playerIndex),
-                    Optional.ofNullable(playerRequest.getDisplayName()).orElse("P" + playerIndex),
+                    Optional.ofNullable(playerRequest.getDisplayName()).orElse(playerId),
                     controllerType,
-                    playerRequest.getAgentConfig() == null ? Map.of() : objectMapper.convertValue(playerRequest.getAgentConfig(), new TypeReference<Map<String, Object>>() { })));
+                    controllerConfig));
             playerIndex++;
         }
         LlmSelectionConfig llmSelectionConfig = toLlmSelectionConfig(request.getLlmSelection(), setupTemplate, players);
@@ -293,6 +280,16 @@ public class PersistentGameApplicationService implements GameApplicationService 
                 players,
                 llmSelectionConfig
         );
+    }
+
+    private String actionTokenHash(String gameId, String playerId, String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(
+                    (gameId + ":" + playerId + ":" + token).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private LlmSelectionConfig toLlmSelectionConfig(CreateGameRequest.LlmSelectionRequest request,
@@ -443,7 +440,7 @@ public class PersistentGameApplicationService implements GameApplicationService 
             case RECOVERING -> "SYSTEM";
             case PAUSED, ENDED -> null;
             case RUNNING -> switch (state.phase()) {
-                case DISCUSSION -> state.playerByIndex(state.discussionSpeakerIndex()).playerId();
+                case DISCUSSION -> state.currentDiscussionSpeaker().playerId();
                 case TEAM_PROPOSAL -> state.playerBySeat(state.currentLeaderSeat()).playerId();
                 case TEAM_VOTE -> state.playerByIndex(state.voteIndex()).playerId();
                 case MISSION_ACTION -> {

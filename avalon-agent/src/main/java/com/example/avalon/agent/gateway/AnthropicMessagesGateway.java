@@ -3,6 +3,7 @@ package com.example.avalon.agent.gateway;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.model.RawCompletionMetadata;
+import com.example.avalon.agent.model.MemoryUpdate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -89,6 +90,9 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
             result.setPublicSpeech(textOrNull(payload.path("publicSpeech")));
             result.setPrivateThought(textOrNull(payload.path("privateThought")));
             result.setActionJson(action.isTextual() ? action.asText() : json.writeValueAsString(action));
+            if (payload.path("memoryUpdate").isObject()) {
+                result.setMemoryUpdate(json.treeToValue(payload.path("memoryUpdate"), MemoryUpdate.class));
+            }
             result.setModelMetadata(metadata(request, response));
             return result;
         } catch (Exception exception) {

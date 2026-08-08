@@ -25,7 +25,7 @@ public class ScriptedPlayerController implements PlayerController {
     public PlayerActionResult act(PlayerTurnContext context) {
         GamePhase phase = GamePhase.valueOf(context.phase());
         PlayerAction action = switch (phase) {
-            case DISCUSSION -> new PublicSpeechAction(buildSpeech(context));
+            case DISCUSSION -> buildDiscussionAction(context);
             case TEAM_PROPOSAL -> new TeamProposalAction(buildProposal(context));
             case TEAM_VOTE -> new TeamVoteAction(VoteChoice.APPROVE);
             case MISSION_ACTION -> new MissionAction(
@@ -39,6 +39,23 @@ public class ScriptedPlayerController implements PlayerController {
 
     private String buildSpeech(PlayerTurnContext context) {
         return "Seat " + context.seatNo() + " confirms the current board state in round " + context.roundNo() + ".";
+    }
+
+    private PublicSpeechAction buildDiscussionAction(PlayerTurnContext context) {
+        var directive = context.discussionDirective();
+        String speechAct = directive.allowedSpeechActs().get(0);
+        List<String> mentions = List.of();
+        List<Long> replies = List.of();
+        if ("CHALLENGE_WINDOW".equals(directive.stage())) {
+            mentions = context.publicState().players().stream()
+                    .map(PublicPlayerSummary::playerId)
+                    .filter(playerId -> !playerId.equals(context.playerId()))
+                    .limit(1)
+                    .toList();
+        } else if ("TARGETED_RESPONSES".equals(directive.stage()) && directive.replyToEventSequence() != null) {
+            replies = List.of(directive.replyToEventSequence());
+        }
+        return new PublicSpeechAction(buildSpeech(context), speechAct, mentions, replies);
     }
 
     private List<String> buildProposal(PlayerTurnContext context) {

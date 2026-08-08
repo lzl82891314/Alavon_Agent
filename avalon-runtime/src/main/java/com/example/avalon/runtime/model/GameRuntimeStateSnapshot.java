@@ -4,6 +4,7 @@ import com.example.avalon.core.game.enums.Camp;
 import com.example.avalon.core.game.enums.GamePhase;
 import com.example.avalon.core.game.enums.GameStatus;
 import com.example.avalon.core.game.enums.MissionChoice;
+import com.example.avalon.core.game.enums.DiscussionStage;
 import com.example.avalon.core.game.enums.VoteChoice;
 import com.example.avalon.core.role.model.RoleAssignment;
 
@@ -29,6 +30,9 @@ public record GameRuntimeStateSnapshot(
         int currentLeaderSeat,
         int failedTeamVoteCount,
         int discussionSpeakerIndex,
+        DiscussionStage discussionStage,
+        List<String> discussionResponseQueue,
+        Map<String, Long> discussionResponseEvents,
         int voteIndex,
         int missionIndex,
         Camp winnerCamp,
@@ -54,6 +58,9 @@ public record GameRuntimeStateSnapshot(
                 state.currentLeaderSeat(),
                 state.failedTeamVoteCount(),
                 state.discussionSpeakerIndex(),
+                state.discussionStage(),
+                state.discussionResponseQueue(),
+                state.discussionResponseEvents(),
                 state.voteIndex(),
                 state.missionIndex(),
                 state.winnerCamp(),

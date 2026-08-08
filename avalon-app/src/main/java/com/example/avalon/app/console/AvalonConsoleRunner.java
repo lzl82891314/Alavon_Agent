@@ -391,12 +391,18 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private PlayerAgentConfig defaultNoopLlmConfig() {
         PlayerAgentConfig config = new PlayerAgentConfig();
         config.setOutputSchemaVersion("v1");
+        config.setCognition(Map.of("evidenceThreshold", 0.55, "beliefRevisionRate", 0.35));
+        config.setCommunication(Map.of("challengeRate", 0.45, "commitmentStrength", 0.60));
+        config.setDeception(Map.of("riskBudget", 0.25, "coverStoryPersistence", 0.70));
         return config;
     }
 
     private PlayerAgentConfig defaultModelPoolLlmConfig() {
         PlayerAgentConfig config = new PlayerAgentConfig();
         config.setOutputSchemaVersion("v1");
+        config.setCognition(Map.of("evidenceThreshold", 0.70, "beliefRevisionRate", 0.25));
+        config.setCommunication(Map.of("challengeRate", 0.70, "commitmentStrength", 0.45));
+        config.setDeception(Map.of("riskBudget", 0.45, "coverStoryPersistence", 0.85));
         return config;
     }
 

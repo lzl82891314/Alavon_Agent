@@ -36,6 +36,7 @@ public class ValidationRetryPolicy {
             try {
                 AgentTurnResult result = agentGateway.playTurn(attemptRequest);
                 lastResult = result;
+                validateStrategicOutput(context, result);
                 PlayerAction action = responseParser.parse(context, result);
                 privateKnowledgeExpressionValidator.validate(context, result);
                 return new ValidatedAgentTurn(result, action, attempts, attemptRequest.copy());
@@ -61,6 +62,31 @@ public class ValidationRetryPolicy {
                 DEFAULT_MAX_ATTEMPTS,
                 lastFailure
         );
+    }
+
+    private void validateStrategicOutput(PlayerTurnContext context, AgentTurnResult result) {
+        if (result == null || result.getMemoryUpdate() == null) {
+            throw new IllegalStateException("Strategic output must include memoryUpdate");
+        }
+        java.util.Set<Long> visibleSequences = context.observations().events().stream()
+                .map(event -> event.sequence()).collect(java.util.stream.Collectors.toSet());
+        java.util.Set<Long> retainedSequences = new java.util.HashSet<>();
+        context.memoryState().worldFacts().forEach(fact -> addSequence(retainedSequences, fact.get("sequence")));
+        context.memoryState().publicClaims().forEach(claim -> addSequence(retainedSequences, claim.get("sequence")));
+        for (Long reference : result.getMemoryUpdate().getEvidenceReferences()) {
+            if (reference == null || (!visibleSequences.contains(reference) && !retainedSequences.contains(reference))) {
+                throw new IllegalStateException("Evidence reference is not visible to this agent: " + reference);
+            }
+        }
+        result.getMemoryUpdate().getRoleBeliefs().forEach((player, probability) -> {
+            if (probability == null || probability < 0.0d || probability > 1.0d) {
+                throw new IllegalStateException("Invalid role belief probability for " + player);
+            }
+        });
+    }
+
+    private void addSequence(java.util.Set<Long> target, Object value) {
+        if (value instanceof Number number) target.add(number.longValue());
     }
 
     private AgentTurnRequest nextAttemptRequest(AgentTurnRequest request, RuntimeException failure) {
@@ -111,20 +137,21 @@ public class ValidationRetryPolicy {
             ).strip();
         }
         if (!(failure instanceof OpenAiCompatibleResponseException responseException)) {
-            return null;
+            return "上一轮战略输出未通过宿主校验：" + failure.getMessage()
+                    + "。请保留基于可见证据的策略，修正字段后重新返回完整 memoryUpdate 和合法 action。";
         }
         String finishReason = stringValue(responseException.diagnostics().get("finishReason"));
         String contentShape = stringValue(responseException.diagnostics().get("assistantContentShape"));
         String message = failure.getMessage() == null ? "" : failure.getMessage();
         if (requiresCompressionRetry(finishReason, contentShape, message)) {
             return """
-                    上一轮输出没有满足结构化要求。请重新生成最小合法 JSON，并优先先写 action：
+                    上一轮输出没有满足结构化要求。请压缩措辞后重新生成完整战略 JSON：
                     - 最终回复只能是一个 JSON 对象，首字符必须是 {，尾字符必须是 }
-                    - 第一层键顺序优先写 action，再写 publicSpeech、privateThought、auditReason、memoryUpdate
-                    - action 必填，且 %s
+                    - memoryUpdate 和 action 都是必填对象；%s
+                    - memoryUpdate 必须保留 roleBeliefs、strategyState、communicationPlan、evidenceReferences 和 observedThroughSequence
                     - publicSpeech 只有在当前阶段需要公开发言时才提供
                     - privateThought 可省略或写 null；如果提供，只写一句极短中文
-                    - auditReason 和 memoryUpdate 默认省略，除非确有必要
+                    - auditReason 可省略；数组中只保留最关键证据，不得编造不可见事件编号
                     - 不要输出 <think>、解释、Markdown、代码块、项目符号或长分析
                     """.formatted(actionRequirement(allowedActions)).strip();
         }

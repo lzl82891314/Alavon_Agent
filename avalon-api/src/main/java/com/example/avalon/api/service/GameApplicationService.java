@@ -29,5 +29,6 @@ public interface GameApplicationService {
 
     PlayerPrivateViewResponse getPlayerView(String gameId, String playerId);
 
-    GameSummaryResponse submitPlayerAction(String gameId, String playerId, GameActionSubmissionRequest request);
+    GameSummaryResponse submitPlayerAction(String gameId, String playerId, String playerToken,
+                                           GameActionSubmissionRequest request);
 }

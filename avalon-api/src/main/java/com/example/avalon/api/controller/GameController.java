@@ -1,18 +1,17 @@
 package com.example.avalon.api.controller;
 
 import com.example.avalon.api.dto.CreateGameRequest;
-import com.example.avalon.api.dto.GameAuditEntryResponse;
 import com.example.avalon.api.dto.GameActionSubmissionRequest;
 import com.example.avalon.api.dto.GameEventEntryResponse;
 import com.example.avalon.api.dto.GameStateResponse;
 import com.example.avalon.api.dto.GameSummaryResponse;
-import com.example.avalon.api.dto.PlayerPrivateViewResponse;
 import com.example.avalon.api.service.GameApplicationService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -61,20 +60,11 @@ public class GameController {
         return gameApplicationService.getReplay(gameId);
     }
 
-    @GetMapping("/{gameId}/audit")
-    public List<GameAuditEntryResponse> getAudit(@PathVariable("gameId") String gameId) {
-        return gameApplicationService.getAudit(gameId);
-    }
-
-    @GetMapping("/{gameId}/players/{playerId}/view")
-    public PlayerPrivateViewResponse getPlayerView(@PathVariable("gameId") String gameId, @PathVariable("playerId") String playerId) {
-        return gameApplicationService.getPlayerView(gameId, playerId);
-    }
-
     @PostMapping("/{gameId}/players/{playerId}/actions")
     public GameSummaryResponse submitPlayerAction(@PathVariable("gameId") String gameId,
                                                   @PathVariable("playerId") String playerId,
+                                                  @RequestHeader("X-Player-Token") String playerToken,
                                                   @RequestBody GameActionSubmissionRequest request) {
-        return gameApplicationService.submitPlayerAction(gameId, playerId, request);
+        return gameApplicationService.submitPlayerAction(gameId, playerId, playerToken, request);
     }
 }

@@ -3,10 +3,13 @@ package com.example.avalon.runtime.model;
 import com.example.avalon.core.game.enums.Camp;
 import com.example.avalon.core.game.enums.GamePhase;
 import com.example.avalon.core.game.enums.GameStatus;
+import com.example.avalon.core.game.enums.DiscussionStage;
 import com.example.avalon.core.game.enums.MissionChoice;
 import com.example.avalon.core.game.enums.PlayerConnectionState;
 import com.example.avalon.core.game.enums.VoteChoice;
 import com.example.avalon.core.game.model.PublicPlayerSummary;
+import com.example.avalon.core.game.model.DiscussionTurnDirective;
+import com.example.avalon.core.game.model.PublicSpeechAction;
 import com.example.avalon.core.player.enums.PlayerControllerType;
 import com.example.avalon.core.role.model.RoleAssignment;
 import com.example.avalon.core.setup.model.RuleSetDefinition;
@@ -42,6 +45,9 @@ public final class GameRuntimeState {
     private int currentLeaderSeat;
     private int failedTeamVoteCount;
     private int discussionSpeakerIndex;
+    private DiscussionStage discussionStage = DiscussionStage.OPENING_STATEMENTS;
+    private final List<String> discussionResponseQueue = new ArrayList<>();
+    private final Map<String, Long> discussionResponseEvents = new LinkedHashMap<>();
     private int voteIndex;
     private int missionIndex;
     private Camp winnerCamp;
@@ -225,7 +231,7 @@ public final class GameRuntimeState {
     }
 
     public void resetRoundTurnState() {
-        discussionSpeakerIndex = 0;
+        resetDiscussion();
         voteIndex = 0;
         missionIndex = 0;
         clearProposalState();
@@ -283,6 +289,83 @@ public final class GameRuntimeState {
 
     public void discussionSpeakerIndex(int discussionSpeakerIndex) {
         this.discussionSpeakerIndex = discussionSpeakerIndex;
+    }
+
+    public DiscussionStage discussionStage() { return discussionStage; }
+
+    public List<String> discussionResponseQueue() { return Collections.unmodifiableList(discussionResponseQueue); }
+
+    public Map<String, Long> discussionResponseEvents() { return Collections.unmodifiableMap(discussionResponseEvents); }
+
+    public void resetDiscussion() {
+        discussionStage = DiscussionStage.OPENING_STATEMENTS;
+        discussionSpeakerIndex = 0;
+        discussionResponseQueue.clear();
+        discussionResponseEvents.clear();
+    }
+
+    public PlayerRegistration currentDiscussionSpeaker() {
+        return switch (discussionStage) {
+            case OPENING_STATEMENTS -> playerByIndex(discussionSpeakerIndex);
+            case CHALLENGE_WINDOW -> playerBySeat(seatAtOffset(currentLeaderSeat, discussionSpeakerIndex + 1));
+            case TARGETED_RESPONSES -> playerById(discussionResponseQueue.get(0));
+            case LEADER_SYNTHESIS -> playerBySeat(currentLeaderSeat);
+        };
+    }
+
+    public DiscussionTurnDirective discussionDirectiveFor(String playerId) {
+        if (phase != GamePhase.DISCUSSION || !currentDiscussionSpeaker().playerId().equals(playerId)) {
+            return DiscussionTurnDirective.none();
+        }
+        return switch (discussionStage) {
+            case OPENING_STATEMENTS -> new DiscussionTurnDirective(discussionStage.name(),
+                    List.of("STATE_OPINION", "PROPOSE_TEST", "DECLARE_VOTE_INTENT"), null, null,
+                    playerCount() - discussionSpeakerIndex);
+            case CHALLENGE_WINDOW -> new DiscussionTurnDirective(discussionStage.name(),
+                    List.of("QUESTION", "CHALLENGE_CONSISTENCY"), null, null, 2 - discussionSpeakerIndex);
+            case TARGETED_RESPONSES -> new DiscussionTurnDirective(discussionStage.name(),
+                    List.of("ANSWER", "DEFEND_SELF", "REVISE_POSITION"), playerId,
+                    discussionResponseEvents.get(playerId), discussionResponseQueue.size());
+            case LEADER_SYNTHESIS -> new DiscussionTurnDirective(discussionStage.name(),
+                    List.of("LEADER_SUMMARY"), null, null, 1);
+        };
+    }
+
+    public void advanceDiscussion(PublicSpeechAction speech, long eventSequence) {
+        switch (discussionStage) {
+            case OPENING_STATEMENTS -> {
+                discussionSpeakerIndex++;
+                if (discussionSpeakerIndex >= playerCount()) {
+                    discussionStage = DiscussionStage.CHALLENGE_WINDOW;
+                    discussionSpeakerIndex = 0;
+                }
+            }
+            case CHALLENGE_WINDOW -> {
+                String speakerId = currentDiscussionSpeaker().playerId();
+                for (String target : speech.mentions()) {
+                    if (!target.equals(speakerId)
+                            && players.stream().anyMatch(player -> player.playerId().equals(target))
+                            && !discussionResponseQueue.contains(target)) {
+                        discussionResponseQueue.add(target);
+                        discussionResponseEvents.put(target, eventSequence);
+                        break;
+                    }
+                }
+                discussionSpeakerIndex++;
+                if (discussionSpeakerIndex >= 2) {
+                    discussionStage = discussionResponseQueue.isEmpty()
+                            ? DiscussionStage.LEADER_SYNTHESIS
+                            : DiscussionStage.TARGETED_RESPONSES;
+                    discussionSpeakerIndex = 0;
+                }
+            }
+            case TARGETED_RESPONSES -> {
+                String completed = discussionResponseQueue.remove(0);
+                discussionResponseEvents.remove(completed);
+                if (discussionResponseQueue.isEmpty()) discussionStage = DiscussionStage.LEADER_SYNTHESIS;
+            }
+            case LEADER_SYNTHESIS -> phase(GamePhase.TEAM_PROPOSAL);
+        }
     }
 
     public int voteIndex() {
@@ -416,6 +499,11 @@ public final class GameRuntimeState {
         state.currentLeaderSeat = snapshot.currentLeaderSeat();
         state.failedTeamVoteCount = snapshot.failedTeamVoteCount();
         state.discussionSpeakerIndex = snapshot.discussionSpeakerIndex();
+        state.discussionStage = snapshot.discussionStage() == null ? DiscussionStage.OPENING_STATEMENTS : snapshot.discussionStage();
+        state.discussionResponseQueue.clear();
+        state.discussionResponseQueue.addAll(snapshot.discussionResponseQueue() == null ? List.of() : snapshot.discussionResponseQueue());
+        state.discussionResponseEvents.clear();
+        state.discussionResponseEvents.putAll(snapshot.discussionResponseEvents() == null ? Map.of() : snapshot.discussionResponseEvents());
         state.voteIndex = snapshot.voteIndex();
         state.missionIndex = snapshot.missionIndex();
         state.winnerCamp = snapshot.winnerCamp();

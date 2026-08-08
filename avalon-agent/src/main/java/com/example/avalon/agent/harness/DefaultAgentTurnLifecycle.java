@@ -34,5 +34,4 @@ public final class DefaultAgentTurnLifecycle implements AgentTurnLifecycle {
         return new HarnessExecution(validated.request(), validated.turnResult(), validated.action(), validated.attempts());
     }
 
-    @Override public void commitAccepted(PreparedAgentTurn prepared, PlayerActionResult result, long acceptedGameVersion) { }
 }

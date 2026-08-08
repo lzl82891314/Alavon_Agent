@@ -4,6 +4,7 @@ import com.example.avalon.core.game.model.AllowedActionSet;
 import com.example.avalon.core.game.model.PlayerTurnContext;
 import com.example.avalon.core.game.model.PublicGameSnapshot;
 import com.example.avalon.core.game.model.PublicPlayerSummary;
+import com.example.avalon.core.game.model.DiscussionTurnDirective;
 import com.example.avalon.core.player.memory.PlayerMemoryState;
 import com.example.avalon.core.player.memory.PlayerPrivateView;
 import com.example.avalon.core.role.model.RoleAssignment;
@@ -22,23 +23,27 @@ public class TurnContextBuilder {
     private final RuntimeCoreContextFactory contextFactory;
     private final com.example.avalon.core.game.rule.GameRuleEngine coreRuleEngine;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final PlayerObservationProjector observationProjector;
 
     public TurnContextBuilder(VisibilityService visibilityService) {
-        this(visibilityService, new RuntimeCoreContextFactory(), new com.example.avalon.core.game.rule.ClassicAvalonRuleEngine());
+        this(visibilityService, new RuntimeCoreContextFactory(), new com.example.avalon.core.game.rule.ClassicAvalonRuleEngine(), new PlayerObservationProjector());
     }
 
     TurnContextBuilder(VisibilityService visibilityService,
                        RuntimeCoreContextFactory contextFactory,
-                       com.example.avalon.core.game.rule.GameRuleEngine coreRuleEngine) {
+                       com.example.avalon.core.game.rule.GameRuleEngine coreRuleEngine,
+                       PlayerObservationProjector observationProjector) {
         this.visibilityService = visibilityService;
         this.contextFactory = contextFactory;
         this.coreRuleEngine = coreRuleEngine;
+        this.observationProjector = observationProjector;
     }
 
     public PlayerTurnContext build(GameRuntimeState state, PlayerRegistration player) {
         RoleAssignment assignment = state.requireRoleAssignmentBySeat(player.seatNo());
         PlayerPrivateView privateView = visibilityService.buildPrivateView(state, assignment);
         AllowedActionSet allowedActions = coreRuleEngine.allowedActions(contextFactory.toRuleContext(state), player.playerId());
+        PlayerMemoryState memory = memoryState(state, player, assignment);
         return new PlayerTurnContext(
                 state.generatedGameId(),
                 state.roundNo(),
@@ -48,7 +53,9 @@ public class TurnContextBuilder {
                 assignment.roleId(),
                 publicSnapshot(state),
                 privateView,
-                memoryState(state, player, assignment),
+                memory,
+                observationProjector.project(state, player.playerId(), memory),
+                state.discussionDirectiveFor(player.playerId()),
                 allowedActions,
                 state.runtimeRuleSetDefinition(),
                 state.runtimeSetupTemplate(),
@@ -65,6 +72,8 @@ public class TurnContextBuilder {
         payload.putIfAbsent("roleId", assignment.roleId());
         payload.putIfAbsent("camp", assignment.camp().name());
         payload.putIfAbsent("strategyMode", "NEUTRAL");
+        payload.putIfAbsent("lastObservedSequence", 0L);
+        payload.putIfAbsent("agentInstanceId", player.playerId() + ":primary");
         payload.putIfAbsent("updatedAt", state.updatedAt());
         return objectMapper.convertValue(payload, PlayerMemoryState.class);
     }
@@ -91,6 +100,11 @@ public class TurnContextBuilder {
                 state.approvedMissionRounds().size(),
                 state.failedMissionRounds().size(),
                 state.currentLeaderSeat(),
+                state.phase() == com.example.avalon.core.game.enums.GamePhase.DISCUSSION ? state.discussionStage() : null,
+                state.phase() == com.example.avalon.core.game.enums.GamePhase.DISCUSSION
+                        ? state.currentDiscussionSpeaker().playerId()
+                        : null,
+                state.events().isEmpty() ? 0L : state.events().get(state.events().size() - 1).seqNo(),
                 currentTeamPlayerIds,
                 state.winnerCamp(),
                 state.winnerCamp() == null ? null : state.winnerCamp().name(),

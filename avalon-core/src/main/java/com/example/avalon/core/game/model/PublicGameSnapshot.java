@@ -1,6 +1,7 @@
 package com.example.avalon.core.game.model;
 
 import com.example.avalon.core.game.enums.Camp;
+import com.example.avalon.core.game.enums.DiscussionStage;
 import com.example.avalon.core.game.enums.GamePhase;
 import com.example.avalon.core.game.enums.GameStatus;
 
@@ -16,6 +17,9 @@ public record PublicGameSnapshot(
         Integer successfulMissionCount,
         Integer failedMissionCount,
         Integer currentLeaderSeat,
+        DiscussionStage discussionStage,
+        String currentDiscussionSpeakerPlayerId,
+        Long latestEventSequence,
         List<String> currentTeamPlayerIds,
         Camp winnerCamp,
         String winnerReason,

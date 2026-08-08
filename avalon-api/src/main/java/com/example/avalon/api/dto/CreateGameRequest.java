@@ -59,6 +59,7 @@ public class CreateGameRequest {
         private String displayName;
         private String controllerType;
         private PlayerAgentConfig agentConfig;
+        private String actionToken;
 
         public Integer getSeatNo() {
             return seatNo;
@@ -90,6 +91,14 @@ public class CreateGameRequest {
 
         public void setAgentConfig(PlayerAgentConfig agentConfig) {
             this.agentConfig = agentConfig;
+        }
+
+        public String getActionToken() {
+            return actionToken;
+        }
+
+        public void setActionToken(String actionToken) {
+            this.actionToken = actionToken;
         }
     }
 

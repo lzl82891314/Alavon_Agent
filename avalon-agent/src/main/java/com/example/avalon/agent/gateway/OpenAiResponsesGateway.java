@@ -3,6 +3,7 @@ package com.example.avalon.agent.gateway;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.model.RawCompletionMetadata;
+import com.example.avalon.agent.model.MemoryUpdate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -59,7 +60,11 @@ public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
             JsonNode payload = json.readTree(output);
             AgentTurnResult result = new AgentTurnResult();
             result.setPublicSpeech(payload.path("publicSpeech").asText(null));
+            result.setPrivateThought(payload.path("privateThought").asText(null));
             result.setActionJson(payload.path("action").isTextual() ? payload.path("action").asText() : json.writeValueAsString(payload.path("action")));
+            if (payload.path("memoryUpdate").isObject()) {
+                result.setMemoryUpdate(json.treeToValue(payload.path("memoryUpdate"), MemoryUpdate.class));
+            }
             RawCompletionMetadata metadata = new RawCompletionMetadata();
             metadata.setProvider("openai"); metadata.setModelName(response.path("model").asText(request.getModelName()));
             metadata.setInputTokens(response.path("usage").path("input_tokens").isMissingNode() ? null : response.path("usage").path("input_tokens").asLong());

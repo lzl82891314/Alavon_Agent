@@ -26,12 +26,33 @@ final class PrivateKnowledgeExpressionValidator {
             return;
         }
         validateText("privateThought", result.getPrivateThought(), candidateKnowledge);
+        validateText("publicSpeech", result.getPublicSpeech(), candidateKnowledge);
+        validateExactKnowledgeDisclosure(context, result.getPublicSpeech());
         AuditReason auditReason = result.getAuditReason();
         if (auditReason == null || auditReason.getReasonSummary() == null) {
             return;
         }
         for (String summary : auditReason.getReasonSummary()) {
             validateText("auditReason.reasonSummary", summary, candidateKnowledge);
+        }
+    }
+
+    private void validateExactKnowledgeDisclosure(PlayerTurnContext context, String publicSpeech) {
+        if (publicSpeech == null || publicSpeech.isBlank()) return;
+        for (VisiblePlayerInfo player : context.privateView().knowledge().visiblePlayers()) {
+            if (player.exactRoleId() == null) continue;
+            for (String clause : clauses(publicSpeech)) {
+                if (containsUncertaintyMarker(clause)) continue;
+                for (String playerAlias : playerAliases(player)) {
+                    for (String roleAlias : roleAliases(player.exactRoleId())) {
+                        if (containsCertainRoleAssertion(clause, playerAlias, roleAlias)) {
+                            throw new CandidateKnowledgeAssertionException(
+                                    "公开发言不得把私有身份知识直接表述为确定事实",
+                                    "publicSpeech=" + clause + " (private exact role knowledge)");
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -128,6 +149,8 @@ final class PrivateKnowledgeExpressionValidator {
             case "PERCIVAL" -> List.of("PERCIVAL", "派西维尔");
             case "ASSASSIN" -> List.of("ASSASSIN", "刺客");
             case "LOYAL_SERVANT" -> List.of("LOYAL_SERVANT", "忠臣");
+            case "MORDRED" -> List.of("MORDRED", "莫德雷德");
+            case "OBERON" -> List.of("OBERON", "奥伯伦");
             default -> List.of(roleId);
         };
     }

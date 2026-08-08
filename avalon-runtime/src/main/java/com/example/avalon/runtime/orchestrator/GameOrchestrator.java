@@ -39,6 +39,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.Collection;
 import java.util.Comparator;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.avalon.core.player.memory.PlayerMemoryState;
 
 public class GameOrchestrator {
     private final GameSessionService sessionService;
@@ -48,6 +51,7 @@ public class GameOrchestrator {
     private final TurnContextBuilder turnContextBuilder;
     private final PlayerControllerResolver controllerResolver;
     private final ResolvedLlmConfigInitializer resolvedLlmConfigInitializer;
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     public GameOrchestrator() {
         this(new GameSessionService(),
@@ -166,12 +170,11 @@ public class GameOrchestrator {
         switch (state.phase()) {
             case DISCUSSION -> {
                 PlayerRegistration player = players.get(0);
-                recordAction(state, player, results.get(player.playerId()));
-                state.discussionSpeakerIndex(state.discussionSpeakerIndex() + 1);
-                if (state.discussionSpeakerIndex() >= state.playerCount()) {
-                    state.discussionSpeakerIndex(0);
-                    state.phase(GamePhase.TEAM_PROPOSAL);
-                }
+                PlayerActionResult result = results.get(player.playerId());
+                validateDiscussionAction(state, player, (com.example.avalon.core.game.model.PublicSpeechAction) result.action());
+                recordAction(state, player, result);
+                state.advanceDiscussion((com.example.avalon.core.game.model.PublicSpeechAction) result.action(),
+                        state.events().get(state.events().size() - 1).seqNo());
             }
             case TEAM_PROPOSAL -> {
                 PlayerRegistration leader = players.get(0);
@@ -207,20 +210,23 @@ public class GameOrchestrator {
                         state.clearProposalState();
                         state.currentLeaderSeat(state.nextSeatAfter(state.currentLeaderSeat()));
                         state.phase(GamePhase.DISCUSSION);
-                        state.discussionSpeakerIndex(0);
+                        state.resetDiscussion();
                     }
                 }
                 state.voteIndex(0);
             }
             case MISSION_ACTION -> {
                 for (PlayerRegistration player : players) {
+                    MissionAction action = (MissionAction) results.get(player.playerId()).action();
+                    RoleAssignment assignment = state.requireRoleAssignmentBySeat(player.seatNo());
+                    if (assignment.camp() == Camp.GOOD && action.choice() == MissionChoice.FAIL) {
+                        throw new GameRuleViolationException("Good players may not submit FAIL mission actions");
+                    }
+                }
+                for (PlayerRegistration player : players) {
                     PlayerActionResult result = results.get(player.playerId());
                     recordAction(state, player, result);
                     MissionAction action = (MissionAction) result.action();
-                    RoleAssignment assignment = state.roleAssignments().get(player.playerId());
-                    if (assignment != null && assignment.camp() == Camp.GOOD && action.choice() == MissionChoice.FAIL) {
-                        throw new GameRuleViolationException("Good players may not submit FAIL mission actions");
-                    }
                     state.putMissionChoice(player.seatNo(), action.choice());
                 }
                 long failCount = state.currentMissionChoices().values().stream()
@@ -248,19 +254,17 @@ public class GameOrchestrator {
     }
 
     private void processDiscussionStep(GameRuntimeState state) {
-        PlayerRegistration player = state.playerByIndex(state.discussionSpeakerIndex());
+        PlayerRegistration player = state.currentDiscussionSpeaker();
         PlayerTurnContext context = turnContextBuilder.build(state, player);
         PlayerController controller = controllerResolver.resolve(state, player);
         PlayerActionResult result = actForPlayer(state, player, controller, context);
         if (result == null) {
             return;
         }
+        validateDiscussionAction(state, player, (com.example.avalon.core.game.model.PublicSpeechAction) result.action());
         recordAction(state, player, result);
-        state.discussionSpeakerIndex(state.discussionSpeakerIndex() + 1);
-        if (state.discussionSpeakerIndex() >= state.playerCount()) {
-            state.discussionSpeakerIndex(0);
-            state.phase(GamePhase.TEAM_PROPOSAL);
-        }
+        state.advanceDiscussion((com.example.avalon.core.game.model.PublicSpeechAction) result.action(),
+                state.events().get(state.events().size() - 1).seqNo());
     }
 
     private void processProposalStep(GameRuntimeState state) {
@@ -314,7 +318,7 @@ public class GameOrchestrator {
                 state.clearProposalState();
                 state.currentLeaderSeat(state.nextSeatAfter(state.currentLeaderSeat()));
                 state.phase(GamePhase.DISCUSSION);
-                state.discussionSpeakerIndex(0);
+                state.resetDiscussion();
             }
             state.voteIndex(0);
         }
@@ -367,7 +371,7 @@ public class GameOrchestrator {
         state.roundNo(state.roundNo() + 1);
         state.currentLeaderSeat(state.nextSeatAfter(state.currentLeaderSeat()));
         state.phase(GamePhase.DISCUSSION);
-        state.discussionSpeakerIndex(0);
+        state.resetDiscussion();
     }
 
     private void processAssassination(GameRuntimeState state) {
@@ -413,14 +417,63 @@ public class GameOrchestrator {
         payload.put("seatNo", player.seatNo());
         payload.put("actionType", action.actionType().name());
         payload.put("speech", result.publicSpeech() == null ? "" : result.publicSpeech());
-        if (result.auditReason() != null) {
-            payload.put("auditReason", result.auditReason());
+        if (action instanceof com.example.avalon.core.game.model.PublicSpeechAction speechAction) {
+            payload.put("speech", speechAction.speechText());
+            payload.put("speechAct", speechAction.speechAct());
+            payload.put("mentions", speechAction.mentions());
+            payload.put("replyToEventSequences", speechAction.replyToEventSequences());
         }
         state.appendEvent("PLAYER_ACTION", state.phase(), player.playerId(), payload);
         RuntimeAuditEntry auditEntry = toAuditEntry(state.events().get(state.events().size() - 1), player, result);
         if (auditEntry != null) {
             state.appendAudit(auditEntry);
         }
+        commitAcceptedMemory(state, player, result);
+    }
+
+    private void validateDiscussionAction(GameRuntimeState state,
+                                          PlayerRegistration player,
+                                          com.example.avalon.core.game.model.PublicSpeechAction speech) {
+        if (!state.currentDiscussionSpeaker().playerId().equals(player.playerId())) {
+            throw new GameRuleViolationException("Player is not the current discussion speaker: " + player.playerId());
+        }
+        if (speech.speechText() == null || speech.speechText().isBlank()) {
+            throw new GameRuleViolationException("Public speech must not be blank");
+        }
+        var directive = state.discussionDirectiveFor(player.playerId());
+        if (!directive.allowedSpeechActs().contains(speech.speechAct())) {
+            throw new GameRuleViolationException("Speech act is not allowed in " + directive.stage());
+        }
+        if ("CHALLENGE_WINDOW".equals(directive.stage())) {
+            boolean hasValidTarget = speech.mentions().stream()
+                    .anyMatch(target -> !target.equals(player.playerId())
+                            && state.players().stream().anyMatch(candidate -> candidate.playerId().equals(target)));
+            if (!hasValidTarget) {
+                throw new GameRuleViolationException("A challenge must mention another player");
+            }
+        }
+        if ("TARGETED_RESPONSES".equals(directive.stage())
+                && directive.replyToEventSequence() != null
+                && !speech.replyToEventSequences().contains(directive.replyToEventSequence())) {
+            throw new GameRuleViolationException("A targeted response must reference the challenge event");
+        }
+    }
+
+    private void commitAcceptedMemory(GameRuntimeState state, PlayerRegistration player, PlayerActionResult result) {
+        if (result.memoryUpdate() == null) return;
+        RoleAssignment assignment = state.requireRoleAssignmentBySeat(player.seatNo());
+        Map<String, Object> payload = new LinkedHashMap<>(state.memoryOf(player.playerId()));
+        payload.putIfAbsent("gameId", state.generatedGameId());
+        payload.putIfAbsent("playerId", player.playerId());
+        payload.putIfAbsent("version", 0L);
+        payload.putIfAbsent("roleId", assignment.roleId());
+        payload.putIfAbsent("camp", assignment.camp().name());
+        payload.putIfAbsent("updatedAt", state.updatedAt());
+        PlayerMemoryState current = objectMapper.convertValue(payload, PlayerMemoryState.class);
+        PlayerMemoryState merged = current.merge(result.memoryUpdate(), java.time.Instant.now());
+        Map<String, Object> stored = objectMapper.convertValue(merged, new TypeReference<Map<String, Object>>() { });
+        state.memoryOf(player.playerId()).clear();
+        state.memoryOf(player.playerId()).putAll(stored);
     }
 
     private PlayerActionResult actForPlayer(GameRuntimeState state,

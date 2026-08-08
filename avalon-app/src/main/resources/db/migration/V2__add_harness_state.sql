@@ -28,17 +28,3 @@ create table action_submission (
     unique (batch_id, idempotency_key),
     foreign key (batch_id) references action_batch(batch_id)
 );
-
-create table player_cognition_snapshot (
-    snapshot_id varchar(64) primary key,
-    game_id varchar(64) not null,
-    player_id varchar(64) not null,
-    based_on_event_seq_no bigint not null,
-    belief_json text not null,
-    strategy_json text not null,
-    communication_plan_json text not null,
-    created_at timestamp not null
-);
-
-create unique index idx_player_cognition_game_player_seq
-    on player_cognition_snapshot (game_id, player_id, based_on_event_seq_no);

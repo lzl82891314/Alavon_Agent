@@ -19,6 +19,13 @@ public record PlayerMemoryState(
         List<String> observations,
         List<String> commitments,
         List<String> inferredFacts,
+        List<Map<String, Object>> worldFacts,
+        List<Map<String, Object>> publicClaims,
+        Map<String, Double> roleBeliefs,
+        Map<String, Object> strategyState,
+        Map<String, Object> communicationPlan,
+        Long lastObservedSequence,
+        String agentInstanceId,
         String strategyMode,
         String lastSummary,
         Instant updatedAt
@@ -29,6 +36,11 @@ public record PlayerMemoryState(
         observations = observations == null ? List.of() : List.copyOf(observations);
         commitments = commitments == null ? List.of() : List.copyOf(commitments);
         inferredFacts = inferredFacts == null ? List.of() : List.copyOf(inferredFacts);
+        worldFacts = worldFacts == null ? List.of() : List.copyOf(worldFacts);
+        publicClaims = publicClaims == null ? List.of() : List.copyOf(publicClaims);
+        roleBeliefs = roleBeliefs == null ? Map.of() : Map.copyOf(roleBeliefs);
+        strategyState = strategyState == null ? Map.of() : Map.copyOf(strategyState);
+        communicationPlan = communicationPlan == null ? Map.of() : Map.copyOf(communicationPlan);
     }
 
     public static PlayerMemoryState empty(String gameId, String playerId, String roleId, Camp camp, Instant now) {
@@ -43,6 +55,13 @@ public record PlayerMemoryState(
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of(),
+                0L,
+                playerId + ":primary",
                 "NEUTRAL",
                 null,
                 now
@@ -65,6 +84,9 @@ public record PlayerMemoryState(
         List<String> nextFacts = new ArrayList<>(inferredFacts);
         nextFacts.addAll(update.inferredFactsToAdd());
 
+        List<Map<String, Object>> nextWorldFacts = appendBounded(worldFacts, update.worldFactsToAdd(), 300);
+        List<Map<String, Object>> nextPublicClaims = appendBounded(publicClaims, update.publicClaimsToAdd(), 300);
+
         return new PlayerMemoryState(
                 gameId,
                 playerId,
@@ -76,10 +98,25 @@ public record PlayerMemoryState(
                 nextObservations,
                 nextCommitments,
                 nextFacts,
+                nextWorldFacts,
+                nextPublicClaims,
+                update.roleBeliefs().isEmpty() ? roleBeliefs : update.roleBeliefs(),
+                update.strategyState().isEmpty() ? strategyState : update.strategyState(),
+                update.communicationPlan().isEmpty() ? communicationPlan : update.communicationPlan(),
+                update.observedThroughSequence() == null ? lastObservedSequence : update.observedThroughSequence(),
+                agentInstanceId,
                 update.strategyMode() == null ? strategyMode : update.strategyMode(),
                 update.lastSummary() == null ? lastSummary : update.lastSummary(),
                 now
         );
+    }
+
+    private static List<Map<String, Object>> appendBounded(List<Map<String, Object>> current,
+                                                            List<Map<String, Object>> additions,
+                                                            int limit) {
+        List<Map<String, Object>> combined = new ArrayList<>(current);
+        combined.addAll(additions);
+        return List.copyOf(combined.subList(Math.max(0, combined.size() - limit), combined.size()));
     }
 }
 

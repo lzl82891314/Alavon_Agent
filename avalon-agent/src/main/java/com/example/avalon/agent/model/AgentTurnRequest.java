@@ -20,6 +20,10 @@ public class AgentTurnRequest {
     private Map<String, Object> publicState = new LinkedHashMap<>();
     private Map<String, Object> memory = new LinkedHashMap<>();
     private Map<String, Object> strategyContext = new LinkedHashMap<>();
+    private List<Map<String, Object>> observationDelta = List.of();
+    private long observationFromSequence;
+    private long observationToSequence;
+    private Map<String, Object> discussionDirective = new LinkedHashMap<>();
     private List<String> allowedActions = List.of();
     private String rulesSummary;
     private String outputSchemaVersion;
@@ -146,6 +150,15 @@ public class AgentTurnRequest {
         this.strategyContext = strategyContext == null ? new LinkedHashMap<>() : new LinkedHashMap<>(strategyContext);
     }
 
+    public List<Map<String, Object>> getObservationDelta() { return observationDelta; }
+    public void setObservationDelta(List<Map<String, Object>> value) { observationDelta = value == null ? List.of() : List.copyOf(value); }
+    public long getObservationFromSequence() { return observationFromSequence; }
+    public void setObservationFromSequence(long value) { observationFromSequence = value; }
+    public long getObservationToSequence() { return observationToSequence; }
+    public void setObservationToSequence(long value) { observationToSequence = value; }
+    public Map<String, Object> getDiscussionDirective() { return discussionDirective; }
+    public void setDiscussionDirective(Map<String, Object> value) { discussionDirective = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
+
     public List<String> getAllowedActions() {
         return allowedActions;
     }
@@ -203,6 +216,10 @@ public class AgentTurnRequest {
         copy.setPublicState(publicState);
         copy.setMemory(memory);
         copy.setStrategyContext(strategyContext);
+        copy.setObservationDelta(observationDelta);
+        copy.setObservationFromSequence(observationFromSequence);
+        copy.setObservationToSequence(observationToSequence);
+        copy.setDiscussionDirective(discussionDirective);
         copy.setAllowedActions(allowedActions);
         copy.setRulesSummary(rulesSummary);
         copy.setOutputSchemaVersion(outputSchemaVersion);

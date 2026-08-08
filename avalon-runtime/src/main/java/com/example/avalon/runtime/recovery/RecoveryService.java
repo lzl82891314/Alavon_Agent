@@ -105,10 +105,11 @@ public class RecoveryService {
                     event.createdAt()));
             case "PLAYER_ACTION" -> {
                 if (event.phase() == GamePhase.DISCUSSION) {
-                    state.discussionSpeakerIndex(state.discussionSpeakerIndex() + 1);
-                    if (state.discussionSpeakerIndex() >= state.playerCount()) {
-                        state.discussionSpeakerIndex(0);
-                    }
+                    state.advanceDiscussion(new com.example.avalon.core.game.model.PublicSpeechAction(
+                            readString(payload.get("speech")),
+                            readString(payload.get("speechAct")),
+                            readStringList(payload.get("mentions")),
+                            readLongList(payload.get("replyToEventSequences"))), event.seqNo());
                 }
             }
             case "TEAM_PROPOSED" -> {
@@ -137,7 +138,7 @@ public class RecoveryService {
                         state.clearProposalState();
                         state.currentLeaderSeat(state.nextSeatAfter(state.currentLeaderSeat()));
                         state.phase(GamePhase.DISCUSSION);
-                        state.discussionSpeakerIndex(0);
+                        state.resetDiscussion();
                     }
                     state.voteIndex(0);
                 }
@@ -191,7 +192,7 @@ public class RecoveryService {
         state.roundNo(state.roundNo() + 1);
         state.currentLeaderSeat(state.nextSeatAfter(state.currentLeaderSeat()));
         state.phase(GamePhase.DISCUSSION);
-        state.discussionSpeakerIndex(0);
+        state.resetDiscussion();
     }
 
     private void endGame(GameRuntimeState state, Camp winner) {
@@ -254,5 +255,10 @@ public class RecoveryService {
             return List.of(string);
         }
         return List.of();
+    }
+
+    private List<Long> readLongList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        return list.stream().filter(Number.class::isInstance).map(Number.class::cast).map(Number::longValue).toList();
     }
 }

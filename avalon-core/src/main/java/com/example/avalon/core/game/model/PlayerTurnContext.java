@@ -2,6 +2,7 @@ package com.example.avalon.core.game.model;
 
 import com.example.avalon.core.player.memory.PlayerMemoryState;
 import com.example.avalon.core.player.memory.PlayerPrivateView;
+import com.example.avalon.core.game.observation.PlayerObservationBatch;
 import com.example.avalon.core.setup.model.RuleSetDefinition;
 import com.example.avalon.core.setup.model.SetupTemplate;
 
@@ -15,6 +16,8 @@ public record PlayerTurnContext(
         PublicGameSnapshot publicState,
         PlayerPrivateView privateView,
         PlayerMemoryState memoryState,
+        PlayerObservationBatch observations,
+        DiscussionTurnDirective discussionDirective,
         AllowedActionSet allowedActions,
         RuleSetDefinition ruleSetDefinition,
         SetupTemplate setupTemplate,

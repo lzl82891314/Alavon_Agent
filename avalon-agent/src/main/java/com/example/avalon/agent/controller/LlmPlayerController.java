@@ -63,7 +63,7 @@ public class LlmPlayerController implements PlayerController {
                     turnResult.getPublicSpeech(),
                     validated.action(),
                     toCoreAuditReason(turnResult),
-                    toCoreMemoryUpdate(turnResult),
+                    toCoreMemoryUpdate(turnResult, context),
                     rawMetadata(turnResult, validated.request(), validated.attempts())
             );
         } catch (AgentTurnExecutionException exception) {
@@ -93,18 +93,39 @@ public class LlmPlayerController implements PlayerController {
         );
     }
 
-    private com.example.avalon.core.player.memory.MemoryUpdate toCoreMemoryUpdate(AgentTurnResult turnResult) {
+    private com.example.avalon.core.player.memory.MemoryUpdate toCoreMemoryUpdate(AgentTurnResult turnResult,
+                                                                                 PlayerTurnContext context) {
         if (turnResult.getMemoryUpdate() == null) {
             return null;
         }
+        com.example.avalon.agent.model.MemoryUpdate proposed = turnResult.getMemoryUpdate();
+        List<Map<String, Object>> worldFacts = new java.util.ArrayList<>();
+        List<Map<String, Object>> publicClaims = new java.util.ArrayList<>();
+        context.observations().events().forEach(event -> {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("sequence", event.sequence());
+            entry.put("eventType", event.eventType());
+            entry.put("actorPlayerId", event.actorPlayerId());
+            entry.put("facts", event.facts());
+            if (event.utterance() != null) entry.put("utterance", event.utterance());
+            if (event.scope() == com.example.avalon.core.game.observation.FactScope.PUBLIC_CLAIM) publicClaims.add(entry);
+            else worldFacts.add(entry);
+        });
         return new com.example.avalon.core.player.memory.MemoryUpdate(
-                turnResult.getMemoryUpdate().getSuspicionDelta(),
-                turnResult.getMemoryUpdate().getTrustDelta(),
-                turnResult.getMemoryUpdate().getObservationsToAdd(),
-                turnResult.getMemoryUpdate().getCommitmentsToAdd(),
-                turnResult.getMemoryUpdate().getInferredFactsToAdd(),
-                turnResult.getMemoryUpdate().getStrategyMode(),
-                turnResult.getMemoryUpdate().getLastSummary()
+                proposed.getSuspicionDelta(),
+                proposed.getTrustDelta(),
+                proposed.getObservationsToAdd(),
+                proposed.getCommitmentsToAdd(),
+                proposed.getInferredFactsToAdd(),
+                worldFacts,
+                publicClaims,
+                proposed.getRoleBeliefs(),
+                proposed.getStrategyState(),
+                proposed.getCommunicationPlan(),
+                proposed.getEvidenceReferences(),
+                context.observations().toSequenceInclusive(),
+                proposed.getStrategyMode(),
+                proposed.getLastSummary()
         );
     }
 
@@ -147,6 +168,10 @@ public class LlmPlayerController implements PlayerController {
         payload.put("publicState", request.getPublicState());
         payload.put("memory", request.getMemory());
         payload.put("strategyContext", request.getStrategyContext());
+        payload.put("observationDelta", request.getObservationDelta());
+        payload.put("observationFromSequence", request.getObservationFromSequence());
+        payload.put("observationToSequence", request.getObservationToSequence());
+        payload.put("discussionDirective", request.getDiscussionDirective());
         payload.put("promptText", request.getPromptText());
         payload.put("outputSchemaVersion", request.getOutputSchemaVersion());
         return payload;

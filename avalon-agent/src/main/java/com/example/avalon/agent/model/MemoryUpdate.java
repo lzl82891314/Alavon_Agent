@@ -11,6 +11,13 @@ public class MemoryUpdate {
     private List<String> observationsToAdd = new ArrayList<>();
     private List<String> commitmentsToAdd = new ArrayList<>();
     private List<String> inferredFactsToAdd = new ArrayList<>();
+    private List<Map<String, Object>> worldFactsToAdd = new ArrayList<>();
+    private List<Map<String, Object>> publicClaimsToAdd = new ArrayList<>();
+    private Map<String, Double> roleBeliefs = new LinkedHashMap<>();
+    private Map<String, Object> strategyState = new LinkedHashMap<>();
+    private Map<String, Object> communicationPlan = new LinkedHashMap<>();
+    private List<Long> evidenceReferences = new ArrayList<>();
+    private Long observedThroughSequence;
     private String strategyMode;
     private String lastSummary;
 
@@ -53,6 +60,21 @@ public class MemoryUpdate {
     public void setInferredFactsToAdd(List<String> inferredFactsToAdd) {
         this.inferredFactsToAdd = inferredFactsToAdd == null ? new ArrayList<>() : new ArrayList<>(inferredFactsToAdd);
     }
+
+    public List<Map<String, Object>> getWorldFactsToAdd() { return worldFactsToAdd; }
+    public void setWorldFactsToAdd(List<Map<String, Object>> value) { worldFactsToAdd = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public List<Map<String, Object>> getPublicClaimsToAdd() { return publicClaimsToAdd; }
+    public void setPublicClaimsToAdd(List<Map<String, Object>> value) { publicClaimsToAdd = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public Map<String, Double> getRoleBeliefs() { return roleBeliefs; }
+    public void setRoleBeliefs(Map<String, Double> value) { roleBeliefs = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
+    public Map<String, Object> getStrategyState() { return strategyState; }
+    public void setStrategyState(Map<String, Object> value) { strategyState = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
+    public Map<String, Object> getCommunicationPlan() { return communicationPlan; }
+    public void setCommunicationPlan(Map<String, Object> value) { communicationPlan = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
+    public List<Long> getEvidenceReferences() { return evidenceReferences; }
+    public void setEvidenceReferences(List<Long> value) { evidenceReferences = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public Long getObservedThroughSequence() { return observedThroughSequence; }
+    public void setObservedThroughSequence(Long value) { observedThroughSequence = value; }
 
     public String getStrategyMode() {
         return strategyMode;

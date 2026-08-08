@@ -122,6 +122,8 @@ docs/**
 
 !docs/symbol-reference/
 !docs/symbol-reference/**
+!docs/reviews/
+!docs/reviews/2026-08-08-战略Agent第一版代码评审.md
 
 # cli脚手架
 plugin-tools/cli/resources/scaffold/packages

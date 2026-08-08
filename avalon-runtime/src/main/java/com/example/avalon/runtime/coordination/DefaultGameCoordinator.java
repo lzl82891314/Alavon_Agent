@@ -136,11 +136,17 @@ public final class DefaultGameCoordinator implements GameCoordinator {
         long version = state.events().size();
         String gameId = state.generatedGameId();
         return switch (state.phase()) {
-            case DISCUSSION -> new SinglePlayerActionRequirement(gameId, version, state.phase(), state.playerByIndex(state.discussionSpeakerIndex()).playerId(), "PUBLIC_SPEECH", state.playerByIndex(state.discussionSpeakerIndex()).controllerType(), Instant.now().plusSeconds(120));
+            case DISCUSSION -> new SinglePlayerActionRequirement(gameId, version, state.phase(), state.currentDiscussionSpeaker().playerId(), "PUBLIC_SPEECH", state.currentDiscussionSpeaker().controllerType(), Instant.now().plusSeconds(120));
             case TEAM_PROPOSAL -> new SinglePlayerActionRequirement(gameId, version, state.phase(), state.playerBySeat(state.currentLeaderSeat()).playerId(), "TEAM_PROPOSAL", state.playerBySeat(state.currentLeaderSeat()).controllerType(), Instant.now().plusSeconds(120));
             case TEAM_VOTE -> new ParallelPlayerActionRequirement(gameId, version, state.phase(), "TEAM_VOTE", state.players().stream().map(PlayerRegistration::playerId).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)), Instant.now().plusSeconds(120));
             case MISSION_ACTION -> new ParallelPlayerActionRequirement(gameId, version, state.phase(), "MISSION_ACTION", state.currentProposalTeam().stream().map(state::playerBySeat).map(PlayerRegistration::playerId).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)), Instant.now().plusSeconds(120));
-            case ASSASSINATION -> new SinglePlayerActionRequirement(gameId, version, state.phase(), state.roleAssignments().values().stream().filter(a -> a.roleId().equals(state.setup().ruleSetDefinition().assassinationRule().assassinRoleId())).findFirst().map(a -> state.playerById(a.playerId())).orElseThrow().playerId(), "ASSASSINATION", com.example.avalon.core.player.enums.PlayerControllerType.LLM, Instant.now().plusSeconds(120));
+            case ASSASSINATION -> {
+                PlayerRegistration assassin = state.roleAssignments().values().stream()
+                        .filter(a -> a.roleId().equals(state.setup().ruleSetDefinition().assassinationRule().assassinRoleId()))
+                        .findFirst().map(a -> state.playerById(a.playerId())).orElseThrow();
+                yield new SinglePlayerActionRequirement(gameId, version, state.phase(), assassin.playerId(),
+                        "ASSASSINATION", assassin.controllerType(), Instant.now().plusSeconds(120));
+            }
             default -> new TerminalRequirement(gameId, version, state.phase());
         };
     }

@@ -308,21 +308,11 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
 
     private String developerPrompt(AgentTurnRequest request) {
         StringBuilder builder = new StringBuilder("""
-                你正在控制一名阿瓦隆玩家。
-                只返回一个 JSON 对象，不要输出 Markdown、代码块、<think>、项目符号或解释文字。
-                最终输出的第一个字符必须是 {，最后一个字符必须是 }。
-                优先返回最小合法 JSON，并把第一层键按 action、publicSpeech、privateThought、auditReason、memoryUpdate 的顺序写出。
-                action 必填，且必须严格匹配用户提示里允许的动作类型，并保证字段完整合法。
-                publicSpeech 只在当前阶段需要公开发言时才提供；如果提供，只写 1 到 2 句简短中文。
-                privateThought 可以省略或写 null；如果提供，只写一句极短中文。
-                auditReason 和 memoryUpdate 默认省略；只有在确有必要时才提供。
-                如果提供 auditReason，它必须是 JSON 对象，字段只允许 goal、reasonSummary、confidence、beliefs。
-                如果提供 memoryUpdate，它必须是 JSON 对象，字段只允许 suspicionDelta、trustDelta、observationsToAdd、commitmentsToAdd、inferredFactsToAdd、strategyMode、lastSummary。
-                关于私有知识的强规则：
-                - 只有 exactRoleId 明确告诉你的身份，才能当作确定事实写出来。
-                - candidateRoleIds 只代表候选集合，不代表你已知真实身份。
-                - 如果在 privateThought 或 auditReason.reasonSummary 中提到 candidateRoleIds，只能使用“怀疑 / 可能 / 更像 / 倾向 / 猜测”等不确定表达。
-                - 绝不能写“P5是梅林”“P3就是莫甘娜”这类确定断言。
+                你负责一个信息不完全的阿瓦隆战略 Agent。
+                严格区分规则事实、其他玩家的公开主张和自己的私有信念；公开主张不自动为真。
+                根据可见 sequence 证据更新概率、跨回合目标、公开承诺和叙事计划。
+                角色策略允许时可以进行游戏内隐瞒或误导，但不得泄露私有身份知识或访问不可见信息。
+                返回一个 JSON 对象，必须同时包含 memoryUpdate 和合法 action；不要输出原始思维链或 JSON 外文本。
                 """.strip());
         if ("minimax".equals(providerId(request))) {
             builder.append(System.lineSeparator())

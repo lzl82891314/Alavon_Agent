@@ -29,15 +29,21 @@ public class ResponseParser {
             throw new IllegalStateException("No allowed action available for player " + context.playerId());
         }
         if (allowedActions.contains(PlayerActionType.PUBLIC_SPEECH)) {
+            JsonNode root = hasActionJson(turnResult) ? readAction(turnResult.getActionJson()) : objectMapper.createObjectNode();
             String speech = turnResult.getPublicSpeech();
-            if ((speech == null || speech.isBlank()) && hasActionJson(turnResult)) {
-                JsonNode root = readAction(turnResult.getActionJson());
+            if (speech == null || speech.isBlank()) {
                 speech = root.path("speechText").asText("");
             }
             if (speech == null || speech.isBlank()) {
                 throw new IllegalStateException("Missing public speech content");
             }
-            return new PublicSpeechAction(speech);
+            String speechAct = root.path("speechAct").asText("");
+            List<String> mentions = new ArrayList<>();
+            root.path("mentions").forEach(node -> mentions.add(node.asText()));
+            List<Long> replies = new ArrayList<>();
+            root.path("replyToEventSequences").forEach(node -> replies.add(node.asLong()));
+            validateDiscussionDirective(context, speechAct, mentions, replies);
+            return new PublicSpeechAction(speech, speechAct, mentions, replies);
         }
 
         JsonNode root = readAction(turnResult.getActionJson());
@@ -53,6 +59,22 @@ public class ResponseParser {
             case ASSASSINATION -> parseAssassination(root);
             case PUBLIC_SPEECH -> new PublicSpeechAction(root.path("speechText").asText(""));
         };
+    }
+
+    private void validateDiscussionDirective(PlayerTurnContext context, String speechAct,
+                                             List<String> mentions, List<Long> replies) {
+        var directive = context.discussionDirective();
+        if (!directive.allowedSpeechActs().contains(speechAct)) {
+            throw new IllegalStateException("Speech act " + speechAct + " is not allowed in " + directive.stage());
+        }
+        if ("CHALLENGE_WINDOW".equals(directive.stage()) && mentions.isEmpty()) {
+            throw new IllegalStateException("A challenge must mention the player being challenged");
+        }
+        if ("TARGETED_RESPONSES".equals(directive.stage())
+                && directive.replyToEventSequence() != null
+                && !replies.contains(directive.replyToEventSequence())) {
+            throw new IllegalStateException("A targeted response must reference the challenge event");
+        }
     }
 
     private TeamProposalAction parseProposal(PlayerTurnContext context, JsonNode root) {

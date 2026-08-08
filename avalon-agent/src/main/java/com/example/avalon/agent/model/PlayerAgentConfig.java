@@ -1,11 +1,17 @@
 package com.example.avalon.agent.model;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 public class PlayerAgentConfig {
     private String playerId;
     private String promptProfileId;
     private String outputSchemaVersion;
     private String auditLevel;
     private ModelProfile modelProfile = new ModelProfile();
+    private Map<String, Object> cognition = new LinkedHashMap<>();
+    private Map<String, Object> communication = new LinkedHashMap<>();
+    private Map<String, Object> deception = new LinkedHashMap<>();
 
     public String getPlayerId() {
         return playerId;
@@ -46,5 +52,12 @@ public class PlayerAgentConfig {
     public void setModelProfile(ModelProfile modelProfile) {
         this.modelProfile = modelProfile == null ? new ModelProfile() : modelProfile;
     }
+
+    public Map<String, Object> getCognition() { return cognition; }
+    public void setCognition(Map<String, Object> value) { cognition = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
+    public Map<String, Object> getCommunication() { return communication; }
+    public void setCommunication(Map<String, Object> value) { communication = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
+    public Map<String, Object> getDeception() { return deception; }
+    public void setDeception(Map<String, Object> value) { deception = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
 }
 

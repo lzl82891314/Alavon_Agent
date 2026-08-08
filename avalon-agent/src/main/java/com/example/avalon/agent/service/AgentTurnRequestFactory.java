@@ -40,7 +40,14 @@ public class AgentTurnRequestFactory {
         request.setPrivateKnowledge(privateKnowledge(context));
         request.setPublicState(publicState(context));
         request.setMemory(memory(context));
-        request.setStrategyContext(roleStrategyPlanner.plan(context));
+        request.setStrategyContext(roleStrategyPlanner.plan(context, agentConfig));
+        request.setObservationDelta(context.observations().events().stream()
+                .map(event -> objectMapper.convertValue(event, new TypeReference<Map<String, Object>>() { }))
+                .toList());
+        request.setObservationFromSequence(context.observations().fromSequenceExclusive());
+        request.setObservationToSequence(context.observations().toSequenceInclusive());
+        request.setDiscussionDirective(objectMapper.convertValue(context.discussionDirective(),
+                new TypeReference<Map<String, Object>>() { }));
         request.setAllowedActions(context.allowedActions().allowedActionTypes().stream().map(Enum::name).toList());
         request.setRulesSummary(context.rulesSummary());
         request.setOutputSchemaVersion(defaultString(agentConfig.getOutputSchemaVersion(), "v1"));
