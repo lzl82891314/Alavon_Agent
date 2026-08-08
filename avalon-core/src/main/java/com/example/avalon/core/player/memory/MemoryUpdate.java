@@ -15,6 +15,7 @@ public record MemoryUpdate(
         Map<String, Object> strategyState,
         Map<String, Object> communicationPlan,
         List<Long> evidenceReferences,
+        Map<String, List<Long>> beliefEvidenceReferences,
         Long observedThroughSequence,
         String strategyMode,
         String lastSummary
@@ -31,11 +32,20 @@ public record MemoryUpdate(
         strategyState = strategyState == null ? Map.of() : Map.copyOf(strategyState);
         communicationPlan = communicationPlan == null ? Map.of() : Map.copyOf(communicationPlan);
         evidenceReferences = evidenceReferences == null ? List.of() : List.copyOf(evidenceReferences);
+        beliefEvidenceReferences = copyEvidenceBindings(beliefEvidenceReferences);
         roleBeliefs.forEach((player, probability) -> {
             if (probability == null || probability < 0.0d || probability > 1.0d) {
                 throw new IllegalArgumentException("Role belief probability must be between 0 and 1 for " + player);
             }
         });
+    }
+
+    private static Map<String, List<Long>> copyEvidenceBindings(Map<String, List<Long>> bindings) {
+        if (bindings == null || bindings.isEmpty()) return Map.of();
+        java.util.LinkedHashMap<String, List<Long>> copy = new java.util.LinkedHashMap<>();
+        bindings.forEach((playerId, references) ->
+                copy.put(playerId, references == null ? List.of() : List.copyOf(references)));
+        return Map.copyOf(copy);
     }
 }
 

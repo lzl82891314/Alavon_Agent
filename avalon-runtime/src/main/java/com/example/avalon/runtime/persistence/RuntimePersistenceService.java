@@ -147,10 +147,7 @@ public class RuntimePersistenceService {
     }
 
     private String eventVisibility(GameEvent event) {
-        return switch (event.type()) {
-            case "ROLE_ASSIGNED", "MISSION_ACTION_CAST" -> "PRIVATE";
-            default -> "PUBLIC";
-        };
+        return com.example.avalon.runtime.disclosure.GameEventVisibilityPolicy.visibility(event.type());
     }
 
     private void persistAudits(GameRuntimeState state) {

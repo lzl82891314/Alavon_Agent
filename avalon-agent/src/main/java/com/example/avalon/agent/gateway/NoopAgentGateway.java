@@ -44,7 +44,9 @@ public final class NoopAgentGateway implements AgentGateway {
         }
         for (Map<String, Object> player : players(request)) {
             String playerId = String.valueOf(player.get("playerId"));
-            beliefs.putIfAbsent(playerId, playerId.equals(request.getPlayerId()) ? 0.0d : 0.4d);
+            beliefs.putIfAbsent(playerId, playerId.equals(request.getPlayerId())
+                    ? ("EVIL".equals(String.valueOf(request.getPrivateKnowledge().get("camp"))) ? 1.0d : 0.0d)
+                    : knownCampProbability(request, playerId));
         }
         for (Map<String, Object> event : request.getObservationDelta()) {
             String type = String.valueOf(event.get("eventType"));
@@ -56,12 +58,33 @@ public final class NoopAgentGateway implements AgentGateway {
         return beliefs;
     }
 
+    private double knownCampProbability(AgentTurnRequest request, String playerId) {
+        Object visible = request.getPrivateKnowledge().get("visiblePlayers");
+        if (visible instanceof List<?> players) {
+            for (Object item : players) {
+                if (item instanceof Map<?, ?> player && playerId.equals(String.valueOf(player.get("playerId")))) {
+                    return "EVIL".equals(String.valueOf(player.get("camp"))) ? 1.0d : 0.0d;
+                }
+            }
+        }
+        return 0.4d;
+    }
+
     private MemoryUpdate memoryUpdate(AgentTurnRequest request, Map<String, Double> beliefs, String speech) {
         MemoryUpdate update = new MemoryUpdate();
         update.setRoleBeliefs(beliefs);
         update.setEvidenceReferences(request.getObservationDelta().stream()
                 .map(event -> event.get("sequence"))
                 .filter(Number.class::isInstance).map(Number.class::cast).map(Number::longValue).toList());
+        Map<String, List<Long>> beliefEvidence = new LinkedHashMap<>();
+        for (String playerId : beliefs.keySet()) {
+            List<Long> references = request.getObservationDelta().stream()
+                    .filter(event -> containsPlayer(event, playerId))
+                    .map(event -> event.get("sequence"))
+                    .filter(Number.class::isInstance).map(Number.class::cast).map(Number::longValue).toList();
+            if (!references.isEmpty()) beliefEvidence.put(playerId, references);
+        }
+        update.setBeliefEvidenceReferences(beliefEvidence);
         update.setStrategyMode("INFORMATION_SEEKING");
         update.setStrategyState(Map.of(
                 "mode", "INFORMATION_SEEKING",
@@ -176,5 +199,18 @@ public final class NoopAgentGateway implements AgentGateway {
     private String write(Object value) {
         try { return json.writeValueAsString(value); }
         catch (Exception exception) { throw new IllegalStateException("Cannot serialize baseline action", exception); }
+    }
+
+    private boolean containsPlayer(Object value, String playerId) {
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .filter(entry -> !"sequence".equals(String.valueOf(entry.getKey())))
+                    .anyMatch(entry -> containsPlayer(entry.getValue(), playerId));
+        }
+        if (value instanceof Iterable<?> values) {
+            for (Object item : values) if (containsPlayer(item, playerId)) return true;
+            return false;
+        }
+        return playerId.equals(value);
     }
 }

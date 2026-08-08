@@ -7,15 +7,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 public final class DefaultDisclosurePolicy implements DisclosurePolicy {
-    private static final Set<String> PRIVATE_EVENT_TYPES = Set.of("ROLE_ASSIGNED", "MISSION_ACTION_CAST");
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
     @Override
     public Optional<GameEventRecord> publicEvent(GameEventRecord event) {
-        if (event == null || !"PUBLIC".equalsIgnoreCase(event.visibility()) || PRIVATE_EVENT_TYPES.contains(event.type())) {
+        if (event == null || !"PUBLIC".equalsIgnoreCase(event.visibility())
+                || !GameEventVisibilityPolicy.isPublic(event.type())) {
             return Optional.empty();
         }
         if (!"MISSION_RESULT_REVEALED".equals(event.type())) {

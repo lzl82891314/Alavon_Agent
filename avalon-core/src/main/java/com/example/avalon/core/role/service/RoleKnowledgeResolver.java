@@ -54,9 +54,9 @@ final class RoleKnowledgeResolver {
                     candidate.playerId(),
                     candidate.seatNo(),
                     candidate.displayName(),
-                    candidateRole.roleId(),
+                    null,
                     candidateRole.camp(),
-                    List.of(candidateRole.roleId())
+                    candidateRolesForCamp(roleDefinitionMap, rule.targetCamp(), rule.exclusions())
             ));
         }
     }
@@ -86,6 +86,17 @@ final class RoleKnowledgeResolver {
         }
     }
 
+    private List<String> candidateRolesForCamp(Map<String, RoleDefinition> roleDefinitionMap,
+                                               Camp camp,
+                                               List<String> exclusions) {
+        return roleDefinitionMap.values().stream()
+                .filter(role -> role.camp() == camp)
+                .map(RoleDefinition::roleId)
+                .filter(roleId -> !exclusions.contains(roleId))
+                .sorted()
+                .toList();
+    }
+
     private void addRoleAmbiguityVisibility(List<VisiblePlayerInfo> visiblePlayers,
                                             List<GamePlayer> allPlayers,
                                             List<RoleAssignment> assignments,
@@ -105,7 +116,7 @@ final class RoleKnowledgeResolver {
                     candidate.seatNo(),
                     candidate.displayName(),
                     null,
-                    candidateRole.camp(),
+                    null,
                     rule.targetRoleIds()
             ));
         }
@@ -129,9 +140,9 @@ final class RoleKnowledgeResolver {
                     candidate.playerId(),
                     candidate.seatNo(),
                     candidate.displayName(),
-                    candidateRole.roleId(),
+                    null,
                     candidateRole.camp(),
-                    List.of(candidateRole.roleId())
+                    candidateRolesForCamp(roleDefinitionMap, Camp.EVIL, rule.exclusions())
             ));
         }
     }

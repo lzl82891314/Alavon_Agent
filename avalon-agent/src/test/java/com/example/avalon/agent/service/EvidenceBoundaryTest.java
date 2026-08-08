@@ -41,6 +41,7 @@ class EvidenceBoundaryTest {
         result.setActionJson("{\"actionType\":\"PUBLIC_SPEECH\",\"speechText\":\"我只依据公开证据判断。\",\"speechAct\":\"STATE_OPINION\",\"mentions\":[],\"replyToEventSequences\":[]}");
         MemoryUpdate update = new MemoryUpdate();
         update.setEvidenceReferences(List.of(999L));
+        update.setBeliefEvidenceReferences(Map.of("P2", List.of(999L)));
         update.setRoleBeliefs(Map.of("P2", 0.7d));
         result.setMemoryUpdate(update);
         return result;

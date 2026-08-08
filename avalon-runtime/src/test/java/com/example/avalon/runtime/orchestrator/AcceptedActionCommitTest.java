@@ -66,7 +66,7 @@ class AcceptedActionCommitTest {
         return new MemoryUpdate(
                 Map.of(), Map.of(), List.of(), List.of(), List.of(), List.of(), List.of(), Map.of(),
                 Map.of("mode", "EVIDENCE_GATHERING"), Map.of("speechAct", "STATE_OPINION"),
-                List.of(), observedThrough, "EVIDENCE_GATHERING", summary);
+                List.of(), Map.of(), observedThrough, "EVIDENCE_GATHERING", summary);
     }
 
     private GameRuntimeState state() {

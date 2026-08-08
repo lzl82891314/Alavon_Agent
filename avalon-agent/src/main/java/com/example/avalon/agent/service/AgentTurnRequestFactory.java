@@ -18,9 +18,11 @@ import java.util.Map;
 public class AgentTurnRequestFactory {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final RoleStrategyPlanner roleStrategyPlanner;
+    private final MemoryContextProjector memoryContextProjector;
 
     public AgentTurnRequestFactory(RoleStrategyPlanner roleStrategyPlanner) {
         this.roleStrategyPlanner = roleStrategyPlanner;
+        this.memoryContextProjector = new MemoryContextProjector();
     }
 
     public AgentTurnRequest create(PlayerTurnContext context, PlayerAgentConfig agentConfig) {
@@ -83,7 +85,7 @@ public class AgentTurnRequestFactory {
     }
 
     private Map<String, Object> memory(PlayerTurnContext context) {
-        return objectMapper.convertValue(context.memoryState(), new TypeReference<Map<String, Object>>() { });
+        return memoryContextProjector.project(context.memoryState());
     }
 
     private String defaultString(String value, String fallback) {

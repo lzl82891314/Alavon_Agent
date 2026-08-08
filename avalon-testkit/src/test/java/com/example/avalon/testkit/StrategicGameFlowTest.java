@@ -18,5 +18,10 @@ class StrategicGameFlowTest {
                 .filter(event -> "PUBLIC_SPEECH".equals(event.payload().get("actionType")))
                 .count();
         assertTrue(publicSpeeches >= 8, "discussion should include more than one fixed statement per player");
+        StrategicBehaviorReport report = new StrategicBehaviorEvaluator().evaluate(
+                result.events(), result.state().auditEntries());
+        assertTrue(report.meetsProtocolGate());
+        assertEquals(1.0d, report.challengeTargetRate());
+        assertEquals(1.0d, report.targetedResponseReferenceRate());
     }
 }

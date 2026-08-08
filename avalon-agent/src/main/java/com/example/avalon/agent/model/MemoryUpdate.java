@@ -17,6 +17,7 @@ public class MemoryUpdate {
     private Map<String, Object> strategyState = new LinkedHashMap<>();
     private Map<String, Object> communicationPlan = new LinkedHashMap<>();
     private List<Long> evidenceReferences = new ArrayList<>();
+    private Map<String, List<Long>> beliefEvidenceReferences = new LinkedHashMap<>();
     private Long observedThroughSequence;
     private String strategyMode;
     private String lastSummary;
@@ -73,6 +74,12 @@ public class MemoryUpdate {
     public void setCommunicationPlan(Map<String, Object> value) { communicationPlan = value == null ? new LinkedHashMap<>() : new LinkedHashMap<>(value); }
     public List<Long> getEvidenceReferences() { return evidenceReferences; }
     public void setEvidenceReferences(List<Long> value) { evidenceReferences = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public Map<String, List<Long>> getBeliefEvidenceReferences() { return beliefEvidenceReferences; }
+    public void setBeliefEvidenceReferences(Map<String, List<Long>> value) {
+        beliefEvidenceReferences = new LinkedHashMap<>();
+        if (value != null) value.forEach((playerId, references) ->
+                beliefEvidenceReferences.put(playerId, references == null ? new ArrayList<>() : new ArrayList<>(references)));
+    }
     public Long getObservedThroughSequence() { return observedThroughSequence; }
     public void setObservedThroughSequence(Long value) { observedThroughSequence = value; }
 

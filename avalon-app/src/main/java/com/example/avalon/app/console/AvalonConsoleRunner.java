@@ -11,6 +11,9 @@ import com.example.avalon.api.dto.ModelProfileProbeResponse;
 import com.example.avalon.api.dto.ModelProfileResponse;
 import com.example.avalon.api.dto.PlayerPrivateViewResponse;
 import com.example.avalon.api.service.GameApplicationService;
+import com.example.avalon.api.service.AdminGameInspectionService;
+import com.example.avalon.api.service.AdminInspectionCapability;
+import com.example.avalon.api.service.LocalConsoleAdminAccess;
 import com.example.avalon.api.service.ModelProfileCatalogService;
 import com.example.avalon.api.service.ModelProfileProbeService;
 import com.example.avalon.api.service.SeedGenerator;
@@ -45,6 +48,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private static final int MAX_PLAYER_COUNT = 10;
 
     private final GameApplicationService gameApplicationService;
+    private final AdminGameInspectionService adminGameInspectionService;
+    private final AdminInspectionCapability adminInspectionCapability;
     private final ModelProfileCatalogService modelProfileCatalogService;
     private final ModelProfileProbeService modelProfileProbeService;
     private final AvalonConfigRegistry configRegistry;
@@ -58,6 +63,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private final ConsoleGameSession session = new ConsoleGameSession();
 
     public AvalonConsoleRunner(GameApplicationService gameApplicationService,
+                               AdminGameInspectionService adminGameInspectionService,
+                               LocalConsoleAdminAccess localConsoleAdminAccess,
                                ModelProfileCatalogService modelProfileCatalogService,
                                ModelProfileProbeService modelProfileProbeService,
                                AvalonConfigRegistry configRegistry,
@@ -69,6 +76,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                                @Value("${avalon.console.report.output-dir:target/reports/avalon}") String reportOutputDir,
                                ConfigurableApplicationContext applicationContext) {
         this.gameApplicationService = gameApplicationService;
+        this.adminGameInspectionService = adminGameInspectionService;
+        this.adminInspectionCapability = localConsoleAdminAccess.capability();
         this.modelProfileCatalogService = modelProfileCatalogService;
         this.modelProfileProbeService = modelProfileProbeService;
         this.configRegistry = configRegistry;
@@ -616,7 +625,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         ensureActiveGame();
         for (int seatNo = 1; seatNo <= activePlayerCount(); seatNo++) {
             String playerId = "P" + seatNo;
-            PlayerPrivateViewResponse view = gameApplicationService.getPlayerView(session.gameId(), playerId);
+            PlayerPrivateViewResponse view = adminGameInspectionService.getPlayerView(
+                    session.gameId(), playerId, adminInspectionCapability);
             System.out.println(printer.formatPlayerView(playerId, view, session));
         }
     }
@@ -627,7 +637,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             throw new IllegalArgumentException("用法：player <playerId>");
         }
         String playerId = parts[1].toUpperCase(Locale.ROOT);
-        PlayerPrivateViewResponse view = gameApplicationService.getPlayerView(session.gameId(), playerId);
+        PlayerPrivateViewResponse view = adminGameInspectionService.getPlayerView(
+                session.gameId(), playerId, adminInspectionCapability);
         System.out.println(printer.formatPlayerView(playerId, view, session));
     }
 
@@ -657,7 +668,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
 
     private void printAudit() {
         ensureActiveGame();
-        List<GameAuditEntryResponse> auditEntries = gameApplicationService.getAudit(session.gameId());
+        List<GameAuditEntryResponse> auditEntries = adminGameInspectionService.getAudit(
+                session.gameId(), adminInspectionCapability);
         if (auditEntries.isEmpty()) {
             System.out.println("当前还没有审计记录。");
             return;
@@ -695,7 +707,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     }
 
     private void printNewAudits() {
-        List<GameAuditEntryResponse> auditEntries = gameApplicationService.getAudit(session.gameId());
+        List<GameAuditEntryResponse> auditEntries = adminGameInspectionService.getAudit(
+                session.gameId(), adminInspectionCapability);
         auditEntries.stream()
                 .filter(entry -> entry.getEventSeqNo() != null && entry.getEventSeqNo() > session.lastPrintedAuditEventSeqNo())
                 .forEach(entry -> {
@@ -726,7 +739,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
 
     private void printDecisionReport(GameStateResponse state) {
         List<GameEventEntryResponse> events = gameApplicationService.getEvents(session.gameId());
-        List<GameAuditEntryResponse> audits = gameApplicationService.getAudit(session.gameId());
+        List<GameAuditEntryResponse> audits = adminGameInspectionService.getAudit(
+                session.gameId(), adminInspectionCapability);
         List<ConsoleDecisionPlayer> players = loadDecisionReportPlayers();
         ConsoleDecisionReport report = decisionReportBuilder.build(state, events, audits, players);
         Path reportPath = resolveReportPath(session.gameId());
@@ -739,7 +753,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         List<ConsoleDecisionPlayer> players = new ArrayList<>();
         for (int seatNo = 1; seatNo <= activePlayerCount(); seatNo++) {
             String playerId = "P" + seatNo;
-            PlayerPrivateViewResponse view = gameApplicationService.getPlayerView(session.gameId(), playerId);
+            PlayerPrivateViewResponse view = adminGameInspectionService.getPlayerView(
+                    session.gameId(), playerId, adminInspectionCapability);
             players.add(new ConsoleDecisionPlayer(
                     playerId,
                     view.getSeatNo() == null ? seatNo : view.getSeatNo(),

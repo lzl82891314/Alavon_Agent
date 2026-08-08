@@ -10,10 +10,14 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Component
 public class ValidationRetryPolicy {
     private static final int DEFAULT_MAX_ATTEMPTS = 2;
+    private static final double INITIAL_PRIOR_MAX_DISTANCE = 0.15d;
+    private static final double NO_EVIDENCE_MAX_DELTA = 0.05d;
+    private static final double EVIDENCE_MAX_DELTA = 0.25d;
 
     private final PrivateKnowledgeExpressionValidator privateKnowledgeExpressionValidator;
 
@@ -68,25 +72,103 @@ public class ValidationRetryPolicy {
         if (result == null || result.getMemoryUpdate() == null) {
             throw new IllegalStateException("Strategic output must include memoryUpdate");
         }
-        java.util.Set<Long> visibleSequences = context.observations().events().stream()
-                .map(event -> event.sequence()).collect(java.util.stream.Collectors.toSet());
-        java.util.Set<Long> retainedSequences = new java.util.HashSet<>();
-        context.memoryState().worldFacts().forEach(fact -> addSequence(retainedSequences, fact.get("sequence")));
-        context.memoryState().publicClaims().forEach(claim -> addSequence(retainedSequences, claim.get("sequence")));
+        Map<Long, Object> availableEvidence = new java.util.LinkedHashMap<>();
+        context.observations().events().forEach(event -> availableEvidence.put(event.sequence(), event));
+        context.memoryState().worldFacts().forEach(fact -> addEvidence(availableEvidence, fact));
+        context.memoryState().publicClaims().forEach(claim -> addEvidence(availableEvidence, claim));
         for (Long reference : result.getMemoryUpdate().getEvidenceReferences()) {
-            if (reference == null || (!visibleSequences.contains(reference) && !retainedSequences.contains(reference))) {
+            if (reference == null || !availableEvidence.containsKey(reference)) {
                 throw new IllegalStateException("Evidence reference is not visible to this agent: " + reference);
             }
         }
+        result.getMemoryUpdate().getBeliefEvidenceReferences().forEach((playerId, references) -> {
+            if (!result.getMemoryUpdate().getRoleBeliefs().containsKey(playerId)) {
+                throw new IllegalStateException("Belief evidence has no corresponding role belief for " + playerId);
+            }
+            for (Long reference : references) {
+                Object evidence = reference == null ? null : availableEvidence.get(reference);
+                if (evidence == null) {
+                    throw new IllegalStateException("Belief evidence is not visible to this agent: " + reference);
+                }
+                if (!evidenceMentionsPlayer(evidence, playerId)) {
+                    throw new IllegalStateException("Belief evidence does not concern " + playerId + ": " + reference);
+                }
+            }
+        });
         result.getMemoryUpdate().getRoleBeliefs().forEach((player, probability) -> {
             if (probability == null || probability < 0.0d || probability > 1.0d) {
                 throw new IllegalStateException("Invalid role belief probability for " + player);
             }
+            validateBeliefChange(context, result, player, probability);
         });
     }
 
-    private void addSequence(java.util.Set<Long> target, Object value) {
-        if (value instanceof Number number) target.add(number.longValue());
+    private void validateBeliefChange(PlayerTurnContext context,
+                                      AgentTurnResult result,
+                                      String playerId,
+                                      double proposedProbability) {
+        java.util.Set<String> knownPlayers = context.publicState().players().stream()
+                .map(com.example.avalon.core.game.model.PublicPlayerSummary::playerId)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!knownPlayers.contains(playerId)) {
+            throw new IllegalStateException("Role belief references an unknown player: " + playerId);
+        }
+        Double privateProbability = privateCampProbability(context, playerId);
+        if (privateProbability != null) {
+            if (Math.abs(proposedProbability - privateProbability) > 0.001d) {
+                throw new IllegalStateException("Role belief contradicts private camp knowledge for " + playerId);
+            }
+            return;
+        }
+        Double prior = context.memoryState().roleBeliefs().get(playerId);
+        List<Long> boundEvidence = result.getMemoryUpdate().getBeliefEvidenceReferences()
+                .getOrDefault(playerId, List.of());
+        boolean hasEvidence = !boundEvidence.isEmpty();
+        double baseline = prior == null ? 0.5d : prior;
+        double allowedDelta = prior == null
+                ? INITIAL_PRIOR_MAX_DISTANCE
+                : hasEvidence ? EVIDENCE_MAX_DELTA : NO_EVIDENCE_MAX_DELTA;
+        if (Math.abs(proposedProbability - baseline) > allowedDelta + 0.000001d) {
+            throw new IllegalStateException("Role belief changed too far without sufficient evidence for " + playerId);
+        }
+    }
+
+    private Double privateCampProbability(PlayerTurnContext context, String playerId) {
+        if (context.playerId().equals(playerId)) {
+            return context.privateView().camp() == com.example.avalon.core.game.enums.Camp.EVIL ? 1.0d : 0.0d;
+        }
+        return context.privateView().knowledge().visiblePlayers().stream()
+                .filter(player -> player.playerId().equals(playerId) && player.camp() != null)
+                .map(player -> player.camp() == com.example.avalon.core.game.enums.Camp.EVIL ? 1.0d : 0.0d)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private void addEvidence(Map<Long, Object> target, Map<String, Object> evidence) {
+        Object value = evidence.get("sequence");
+        if (value instanceof Number number) target.put(number.longValue(), evidence);
+    }
+
+    private boolean evidenceMentionsPlayer(Object evidence, String playerId) {
+        if (evidence instanceof com.example.avalon.core.game.observation.ObservedGameEvent event) {
+            return playerId.equals(event.actorPlayerId())
+                    || containsPlayer(event.facts(), playerId)
+                    || containsPlayer(event.mentions(), playerId);
+        }
+        return containsPlayer(evidence, playerId);
+    }
+
+    private boolean containsPlayer(Object value, String playerId) {
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .filter(entry -> !"sequence".equals(String.valueOf(entry.getKey())))
+                    .anyMatch(entry -> containsPlayer(entry.getValue(), playerId));
+        }
+        if (value instanceof Iterable<?> values) {
+            for (Object item : values) if (containsPlayer(item, playerId)) return true;
+            return false;
+        }
+        return playerId.equals(value);
     }
 
     private AgentTurnRequest nextAttemptRequest(AgentTurnRequest request, RuntimeException failure) {

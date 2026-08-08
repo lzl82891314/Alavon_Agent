@@ -25,12 +25,14 @@ class PlayerObservationProjectorTest {
                 "actionType", "PUBLIC_SPEECH", "speech", "P1 很可疑", "speechAct", "ACCUSE"));
         state.appendEvent("MISSION_ACTION_CAST", state.phase(), "P2", Map.of("choice", "FAIL"));
         state.appendEvent("TEAM_PROPOSED", state.phase(), "P1", Map.of("playerIds", List.of("P1", "P3")));
+        state.appendEvent("FUTURE_PRIVATE_EVENT", state.phase(), "SYSTEM", Map.of("secret", "value"));
 
         var batch = new PlayerObservationProjector().project(state, "P1",
                 PlayerMemoryState.empty("g1", "P1", "LOYAL_SERVANT",
                         com.example.avalon.core.game.enums.Camp.GOOD, Instant.now()));
 
         assertEquals(List.of(2L, 4L), batch.events().stream().map(event -> event.sequence()).toList());
+        assertEquals(5L, batch.toSequenceInclusive());
         assertEquals(FactScope.PUBLIC_CLAIM, batch.events().get(0).scope());
         assertEquals(FactScope.WORLD_FACT, batch.events().get(1).scope());
         assertFalse(batch.events().stream().anyMatch(event -> event.facts().containsKey("roleId") || event.facts().containsKey("choice")));

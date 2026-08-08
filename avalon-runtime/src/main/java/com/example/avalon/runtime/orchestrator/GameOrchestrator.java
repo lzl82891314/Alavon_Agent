@@ -125,8 +125,8 @@ public class GameOrchestrator {
         switch (state.phase()) {
             case DISCUSSION -> processDiscussionStep(state);
             case TEAM_PROPOSAL -> processProposalStep(state);
-            case TEAM_VOTE -> processVoteStep(state);
-            case MISSION_ACTION -> processMissionStep(state);
+            case TEAM_VOTE -> processVoteBatch(state);
+            case MISSION_ACTION -> processMissionBatch(state);
             case MISSION_RESOLUTION -> resolveMission(state);
             case ASSASSINATION -> processAssassination(state);
             case ROLE_REVEAL, GAME_END, ROUND_START, WAITING_FOR_HUMAN_INPUT -> {
@@ -287,62 +287,32 @@ public class GameOrchestrator {
         state.voteIndex(0);
     }
 
-    private void processVoteStep(GameRuntimeState state) {
-        PlayerRegistration voter = state.playerByIndex(state.voteIndex());
-        PlayerTurnContext context = turnContextBuilder.build(state, voter);
-        PlayerController controller = controllerResolver.resolve(state, voter);
-        PlayerActionResult result = actForPlayer(state, voter, controller, context);
-        if (result == null) {
-            return;
-        }
-        recordAction(state, voter, result);
-        TeamVoteAction voteAction = (TeamVoteAction) result.action();
-        state.putVote(voter.seatNo(), voteAction.vote());
-        state.appendEvent("TEAM_VOTE_CAST", GamePhase.TEAM_VOTE, voter.playerId(), Map.of("vote", voteAction.vote().name()));
-        state.voteIndex(state.voteIndex() + 1);
-        if (state.voteIndex() >= state.playerCount()) {
-            long approves = state.currentVotes().values().stream().filter(vote -> vote == VoteChoice.APPROVE).count();
-            long rejects = state.currentVotes().size() - approves;
-            if (approves > rejects) {
-                state.phase(GamePhase.MISSION_ACTION);
-                state.clearMissionState();
-                state.currentProposalTeam().forEach(state::addCurrentMissionSeat);
-            } else {
-                state.failedTeamVoteCount(state.failedTeamVoteCount() + 1);
-                state.appendEvent("TEAM_VOTE_REJECTED", GamePhase.TEAM_VOTE, "SYSTEM", Map.of(
-                        "failedTeamVoteCount", state.failedTeamVoteCount()));
-                if (state.failedTeamVoteCount() >= 5) {
-                    endGame(state, Camp.EVIL, GamePhase.GAME_END);
-                    return;
-                }
-                state.clearProposalState();
-                state.currentLeaderSeat(state.nextSeatAfter(state.currentLeaderSeat()));
-                state.phase(GamePhase.DISCUSSION);
-                state.resetDiscussion();
-            }
-            state.voteIndex(0);
-        }
+    private void processVoteBatch(GameRuntimeState state) {
+        collectFrozenActions(state, state.players()).ifPresent(results -> applyCollectedActions(state, results));
     }
 
-    private void processMissionStep(GameRuntimeState state) {
-        PlayerRegistration player = state.playerBySeat(state.currentProposalTeam().get(state.missionIndex()));
-        PlayerTurnContext context = turnContextBuilder.build(state, player);
-        PlayerController controller = controllerResolver.resolve(state, player);
-        PlayerActionResult result = actForPlayer(state, player, controller, context);
-        if (result == null) {
-            return;
+    private void processMissionBatch(GameRuntimeState state) {
+        List<PlayerRegistration> missionPlayers = state.currentProposalTeam().stream()
+                .map(state::playerBySeat)
+                .toList();
+        collectFrozenActions(state, missionPlayers).ifPresent(results -> applyCollectedActions(state, results));
+    }
+
+    private java.util.Optional<Map<String, PlayerActionResult>> collectFrozenActions(
+            GameRuntimeState state,
+            List<PlayerRegistration> players) {
+        Map<String, PlayerTurnContext> frozenContexts = new LinkedHashMap<>();
+        players.forEach(player -> frozenContexts.put(player.playerId(), turnContextBuilder.build(state, player)));
+        Map<String, PlayerActionResult> results = new LinkedHashMap<>();
+        for (PlayerRegistration player : players) {
+            PlayerController controller = controllerResolver.resolve(state, player);
+            PlayerActionResult result = actForPlayer(state, player, controller, frozenContexts.get(player.playerId()));
+            if (result == null) {
+                return java.util.Optional.empty();
+            }
+            results.put(player.playerId(), result);
         }
-        recordAction(state, player, result);
-        MissionAction missionAction = (MissionAction) result.action();
-        if (context.privateView().camp() == Camp.GOOD && missionAction.choice() == MissionChoice.FAIL) {
-            throw new GameRuleViolationException("Good players may not submit FAIL mission actions");
-        }
-        state.putMissionChoice(player.seatNo(), missionAction.choice());
-        state.appendEvent("MISSION_ACTION_CAST", GamePhase.MISSION_ACTION, player.playerId(), Map.of("choice", missionAction.choice().name()));
-        state.missionIndex(state.missionIndex() + 1);
-        if (state.missionIndex() >= state.currentProposalTeam().size()) {
-            state.phase(GamePhase.MISSION_RESOLUTION);
-        }
+        return java.util.Optional.of(results);
     }
 
     private void resolveMission(GameRuntimeState state) {

@@ -64,6 +64,7 @@ public final class PromptBuilder {
                   "memoryUpdate": {
                     "roleBeliefs": {"playerId": 0.0},
                     "evidenceReferences": [0],
+                    "beliefEvidenceReferences": {"playerId": [0]},
                     "strategyState": {
                       "mode": "...",
                       "objective": "...",
@@ -89,6 +90,7 @@ public final class PromptBuilder {
                 }
 
                 memoryUpdate 是战略回合的必填字段。evidenceReferences 只能引用 sequenceRange 内或既有记忆中存在的公开事件。
+                beliefEvidenceReferences 必须按玩家绑定与该玩家直接相关的可见事件；全局 evidenceReferences 不能替代逐玩家绑定。
                 """.formatted(
                 request.getGameId(), request.getPlayerId(), request.getSeatNo(), request.getRoleId(),
                 request.getRoundNo(), request.getPhase(), request.getRulesSummary(), json(request.getAllowedActions()),

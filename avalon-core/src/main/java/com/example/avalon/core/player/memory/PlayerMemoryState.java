@@ -24,6 +24,7 @@ public record PlayerMemoryState(
         Map<String, Double> roleBeliefs,
         Map<String, Object> strategyState,
         Map<String, Object> communicationPlan,
+        Map<String, List<Long>> beliefEvidenceReferences,
         Long lastObservedSequence,
         String agentInstanceId,
         String strategyMode,
@@ -41,6 +42,7 @@ public record PlayerMemoryState(
         roleBeliefs = roleBeliefs == null ? Map.of() : Map.copyOf(roleBeliefs);
         strategyState = strategyState == null ? Map.of() : Map.copyOf(strategyState);
         communicationPlan = communicationPlan == null ? Map.of() : Map.copyOf(communicationPlan);
+        beliefEvidenceReferences = copyEvidenceBindings(beliefEvidenceReferences);
     }
 
     public static PlayerMemoryState empty(String gameId, String playerId, String roleId, Camp camp, Instant now) {
@@ -60,6 +62,7 @@ public record PlayerMemoryState(
                 Map.of(),
                 Map.of(),
                 Map.of(),
+                Map.of(),
                 0L,
                 playerId + ":primary",
                 "NEUTRAL",
@@ -75,17 +78,12 @@ public record PlayerMemoryState(
         Map<String, Double> nextTrust = new LinkedHashMap<>(trustScores);
         update.trustDelta().forEach((key, value) -> nextTrust.merge(key, value, Double::sum));
 
-        List<String> nextObservations = new ArrayList<>(observations);
-        nextObservations.addAll(update.observationsToAdd());
+        List<String> nextObservations = appendStringsBounded(observations, update.observationsToAdd(), 80);
+        List<String> nextCommitments = appendStringsBounded(commitments, update.commitmentsToAdd(), 40);
+        List<String> nextFacts = appendStringsBounded(inferredFacts, update.inferredFactsToAdd(), 80);
 
-        List<String> nextCommitments = new ArrayList<>(commitments);
-        nextCommitments.addAll(update.commitmentsToAdd());
-
-        List<String> nextFacts = new ArrayList<>(inferredFacts);
-        nextFacts.addAll(update.inferredFactsToAdd());
-
-        List<Map<String, Object>> nextWorldFacts = appendBounded(worldFacts, update.worldFactsToAdd(), 300);
-        List<Map<String, Object>> nextPublicClaims = appendBounded(publicClaims, update.publicClaimsToAdd(), 300);
+        List<Map<String, Object>> nextWorldFacts = appendBounded(worldFacts, update.worldFactsToAdd(), 120);
+        List<Map<String, Object>> nextPublicClaims = appendBounded(publicClaims, update.publicClaimsToAdd(), 120);
 
         return new PlayerMemoryState(
                 gameId,
@@ -103,12 +101,33 @@ public record PlayerMemoryState(
                 update.roleBeliefs().isEmpty() ? roleBeliefs : update.roleBeliefs(),
                 update.strategyState().isEmpty() ? strategyState : update.strategyState(),
                 update.communicationPlan().isEmpty() ? communicationPlan : update.communicationPlan(),
+                mergeEvidenceBindings(beliefEvidenceReferences, update.beliefEvidenceReferences()),
                 update.observedThroughSequence() == null ? lastObservedSequence : update.observedThroughSequence(),
                 agentInstanceId,
                 update.strategyMode() == null ? strategyMode : update.strategyMode(),
-                update.lastSummary() == null ? lastSummary : update.lastSummary(),
+                update.lastSummary() == null ? lastSummary : truncate(update.lastSummary(), 2000),
                 now
         );
+    }
+
+    private static Map<String, List<Long>> copyEvidenceBindings(Map<String, List<Long>> bindings) {
+        if (bindings == null || bindings.isEmpty()) return Map.of();
+        Map<String, List<Long>> copy = new LinkedHashMap<>();
+        bindings.forEach((playerId, references) ->
+                copy.put(playerId, references == null ? List.of() : List.copyOf(references)));
+        return Map.copyOf(copy);
+    }
+
+    private static Map<String, List<Long>> mergeEvidenceBindings(Map<String, List<Long>> current,
+                                                                  Map<String, List<Long>> additions) {
+        if (additions == null || additions.isEmpty()) return current;
+        Map<String, List<Long>> merged = new LinkedHashMap<>(current);
+        additions.forEach((playerId, references) -> {
+            List<Long> values = new ArrayList<>(merged.getOrDefault(playerId, List.of()));
+            if (references != null) values.addAll(references);
+            merged.put(playerId, List.copyOf(values.subList(Math.max(0, values.size() - 20), values.size())));
+        });
+        return copyEvidenceBindings(merged);
     }
 
     private static List<Map<String, Object>> appendBounded(List<Map<String, Object>> current,
@@ -117,6 +136,17 @@ public record PlayerMemoryState(
         List<Map<String, Object>> combined = new ArrayList<>(current);
         combined.addAll(additions);
         return List.copyOf(combined.subList(Math.max(0, combined.size() - limit), combined.size()));
+    }
+
+    private static List<String> appendStringsBounded(List<String> current, List<String> additions, int limit) {
+        List<String> combined = new ArrayList<>(current);
+        additions.stream().map(value -> truncate(value, 500)).forEach(combined::add);
+        return List.copyOf(combined.subList(Math.max(0, combined.size() - limit), combined.size()));
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) return value;
+        return value.substring(0, maxLength);
     }
 }
 

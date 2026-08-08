@@ -123,6 +123,7 @@ public class LlmPlayerController implements PlayerController {
                 proposed.getStrategyState(),
                 proposed.getCommunicationPlan(),
                 proposed.getEvidenceReferences(),
+                proposed.getBeliefEvidenceReferences(),
                 context.observations().toSequenceInclusive(),
                 proposed.getStrategyMode(),
                 proposed.getLastSummary()

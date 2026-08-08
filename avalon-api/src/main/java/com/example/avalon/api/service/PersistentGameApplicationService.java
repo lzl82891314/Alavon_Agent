@@ -56,7 +56,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
 @Service
-public class PersistentGameApplicationService implements GameApplicationService {
+public class PersistentGameApplicationService implements GameApplicationService, AdminGameInspectionService {
     private final AvalonConfigRegistry configRegistry;
     private final GameOrchestrator gameOrchestrator;
     private final GameSessionService gameSessionService;
@@ -68,6 +68,7 @@ public class PersistentGameApplicationService implements GameApplicationService 
     private final SeedGenerator seedGenerator;
     private final ObjectMapper objectMapper;
     private final GameCoordinator gameCoordinator;
+    private final AdminAuthorizationPolicy adminAuthorizationPolicy;
 
     public PersistentGameApplicationService(
             AvalonConfigRegistry configRegistry,
@@ -79,7 +80,8 @@ public class PersistentGameApplicationService implements GameApplicationService 
             TurnContextBuilder turnContextBuilder,
             ModelProfileCatalogService modelProfileCatalogService,
             SeedGenerator seedGenerator,
-            GameCoordinator gameCoordinator
+            GameCoordinator gameCoordinator,
+            AdminAuthorizationPolicy adminAuthorizationPolicy
     ) {
         this.configRegistry = configRegistry;
         this.gameOrchestrator = gameOrchestrator;
@@ -92,6 +94,7 @@ public class PersistentGameApplicationService implements GameApplicationService 
         this.seedGenerator = seedGenerator;
         this.objectMapper = new ObjectMapper().findAndRegisterModules();
         this.gameCoordinator = gameCoordinator;
+        this.adminAuthorizationPolicy = adminAuthorizationPolicy;
     }
 
     @Override
@@ -163,12 +166,15 @@ public class PersistentGameApplicationService implements GameApplicationService 
     }
 
     @Override
-    public List<GameAuditEntryResponse> getAudit(String gameId) {
+    public List<GameAuditEntryResponse> getAudit(String gameId, AdminInspectionCapability capability) {
+        adminAuthorizationPolicy.requireAuthorized(capability);
         return replayQueryService.audit(gameId).stream().map(this::toAuditResponse).toList();
     }
 
     @Override
-    public PlayerPrivateViewResponse getPlayerView(String gameId, String playerId) {
+    public PlayerPrivateViewResponse getPlayerView(String gameId, String playerId,
+                                                   AdminInspectionCapability capability) {
+        adminAuthorizationPolicy.requireAuthorized(capability);
         GameRuntimeState state = requireState(gameId);
         PlayerRegistration player = state.playerById(playerId);
         PlayerTurnContext context = turnContextBuilder.build(state, player);
