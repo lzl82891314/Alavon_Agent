@@ -20,5 +20,7 @@ avalon:
   storage:
     database-path: ${user.home}/.avalon-agent/arenas/default--37a8eec1/avalon-v1.sqlite
   app-name: Avalon AI
+  logging:
+    log-directory: ${user.home}/.avalon-agent/logs
   console:
     enabled: false

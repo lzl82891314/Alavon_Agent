@@ -19,6 +19,7 @@ import com.example.avalon.api.service.ModelProfileProbeService;
 import com.example.avalon.api.service.SeedGenerator;
 import com.example.avalon.config.model.AvalonConfigRegistry;
 import com.example.avalon.core.setup.model.SetupTemplate;
+import com.example.avalon.core.player.controller.PlayerActionGenerationException;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -122,9 +123,26 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                     return;
                 }
             } catch (Exception exception) {
-                System.out.println("命令执行失败：" + exception.getMessage());
+                System.out.println("命令执行失败：" + commandFailureMessage(exception));
             }
         }
+    }
+
+    private String commandFailureMessage(Exception exception) {
+        if (exception instanceof PlayerActionGenerationException generationException) {
+            Object validation = generationException.rawMetadata().get("validation");
+            if (validation instanceof Map<?, ?> validationMap) {
+                Object detail = validationMap.get("errorMessage");
+                if (detail != null && !String.valueOf(detail).isBlank()) {
+                    return generationException.getMessage() + "；具体原因：" + detail;
+                }
+            }
+            Throwable cause = generationException.getCause();
+            if (cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()) {
+                return generationException.getMessage() + "；具体原因：" + cause.getMessage();
+            }
+        }
+        return exception.getMessage();
     }
 
     private boolean dispatch(String commandLine, BufferedReader reader) throws IOException {

@@ -7,6 +7,8 @@ import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.strategy.RoleStrategyPolicy;
 import com.example.avalon.core.game.model.PlayerAction;
 import com.example.avalon.core.game.model.PlayerTurnContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -15,6 +17,7 @@ import java.util.Map;
 
 @Component
 public class ValidationRetryPolicy {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ValidationRetryPolicy.class);
     private static final int DEFAULT_MAX_ATTEMPTS = 2;
     private static final double INITIAL_PRIOR_MAX_DISTANCE = 0.15d;
     private static final double NO_EVIDENCE_MAX_DELTA = 0.05d;
@@ -47,7 +50,11 @@ public class ValidationRetryPolicy {
                 return new ValidatedAgentTurn(result, action, attempts, attemptRequest.copy());
             } catch (RuntimeException exception) {
                 lastFailure = exception;
-                if (attempts < DEFAULT_MAX_ATTEMPTS && shouldRetry(exception)) {
+                boolean retryable = attempts < DEFAULT_MAX_ATTEMPTS && shouldRetry(exception);
+                LOGGER.warn("agent_validation_failed gameId={} playerId={} phase={} modelId={} attempt={} retryable={} error={}",
+                        request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
+                        attempts, retryable, exception.getMessage());
+                if (retryable) {
                     attemptRequest = nextAttemptRequest(attemptRequest, exception);
                     continue;
                 }

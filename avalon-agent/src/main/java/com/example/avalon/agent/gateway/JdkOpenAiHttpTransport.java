@@ -3,6 +3,8 @@ package com.example.avalon.agent.gateway;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.ConnectException;
@@ -18,6 +20,7 @@ import java.util.Map;
 
 @Component
 public class JdkOpenAiHttpTransport implements OpenAiHttpTransport {
+    private static final Logger LOGGER = LoggerFactory.getLogger(JdkOpenAiHttpTransport.class);
     private static final List<Integer> RETRYABLE_STATUS_CODES = List.of(429, 500, 502, 503, 504);
     private static final List<Duration> RETRY_BACKOFFS = List.of(Duration.ofMillis(500), Duration.ofMillis(1500));
 
@@ -31,6 +34,8 @@ public class JdkOpenAiHttpTransport implements OpenAiHttpTransport {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 HttpResponse<String> response = send(uri, headers, requestBody, timeout);
+                LOGGER.info("http_model_response host={} path={} attempt={} status={}",
+                        uri.getHost(), uri.getPath(), attempt, response.statusCode());
                 if (response.statusCode() >= 400) {
                     boolean retryable = isRetryableStatus(response.statusCode());
                     OpenAiCompatibleTransportException failure = statusFailure(
@@ -50,6 +55,8 @@ public class JdkOpenAiHttpTransport implements OpenAiHttpTransport {
                 }
                 return parseJsonResponse(response, uri, timeout, attempt);
             } catch (OpenAiCompatibleTransportException exception) {
+                LOGGER.error("http_model_failure host={} path={} attempt={} error={}",
+                        uri.getHost(), uri.getPath(), attempt, exception.getMessage());
                 boolean retryable = retryable(exception);
                 if (!retryable || attempt >= maxAttempts) {
                     throw exception;
@@ -60,6 +67,8 @@ public class JdkOpenAiHttpTransport implements OpenAiHttpTransport {
                 Thread.currentThread().interrupt();
                 throw transportFailure(uri, timeout, attempt, maxAttempts, exception, false, null);
             } catch (IOException exception) {
+                LOGGER.error("http_model_io_failure host={} path={} attempt={} error={}",
+                        uri.getHost(), uri.getPath(), attempt, exception.getMessage());
                 OpenAiCompatibleTransportException failure = transportFailure(
                         uri,
                         timeout,

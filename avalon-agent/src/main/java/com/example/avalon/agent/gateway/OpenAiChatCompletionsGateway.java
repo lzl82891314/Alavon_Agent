@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -22,6 +24,7 @@ import java.util.function.Function;
 
 @Component
 public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
+    private static final Logger LOGGER = LoggerFactory.getLogger(OpenAiChatCompletionsGateway.class);
     private static final String GATEWAY_TYPE = "openai-compatible";
     private static final String DEFAULT_MODEL = "gpt-5.2";
     private static final String OPTIONAL_SECTION_WARNINGS = "optionalSectionWarnings";
@@ -60,6 +63,10 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
     @Override
     public AgentTurnResult playTurn(AgentTurnRequest request) {
         RequestSettings settings = requestSettings(request);
+        long startedAt = System.nanoTime();
+        LOGGER.info("model_call_start gameId={} playerId={} phase={} modelId={} provider={} endpoint={} timeoutMs={}",
+                request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
+                request.getProvider(), OpenAiCompatibleSupport.endpointUri(settings.baseUrl()), settings.timeout().toMillis());
         JsonNode response;
         try {
             response = transport.postChatCompletion(
@@ -69,9 +76,18 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
                     settings.timeout()
             );
         } catch (RuntimeException exception) {
+            LOGGER.error("model_call_failed gameId={} playerId={} phase={} modelId={} elapsedMs={} error={}",
+                    request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
+                    elapsedMillis(startedAt), exception.getMessage());
             throw transportException(request, exception);
         }
+        LOGGER.info("model_call_response gameId={} playerId={} phase={} modelId={} elapsedMs={} responseReceived=true",
+                request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(), elapsedMillis(startedAt));
         return parseResponse(request, response);
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
     }
 
     private Map<String, String> headers(RequestSettings settings) {

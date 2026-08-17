@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="LOG_DIR" source="avalon.logging.log-directory"
+                    defaultValue="${user.home}/.avalon-agent/logs"/>
+    <appender name="APPLICATION_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/application.log</file>
+        <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{48} - %msg%n</pattern></encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/application.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize><maxHistory>14</maxHistory><totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+    <appender name="MODEL_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/model-calls.log</file>
+        <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{48} - %msg%n</pattern></encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/model-calls.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize><maxHistory>14</maxHistory><totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+    <appender name="VALIDATION_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/validation.log</file>
+        <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{48} - %msg%n</pattern></encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/validation.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize><maxHistory>14</maxHistory><totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+    <logger name="com.example.avalon.agent.gateway" level="INFO" additivity="false">
+        <appender-ref ref="MODEL_FILE"/>
+    </logger>
+    <logger name="com.example.avalon.agent.service" level="INFO" additivity="false">
+        <appender-ref ref="VALIDATION_FILE"/>
+    </logger>
+    <root level="INFO"><appender-ref ref="APPLICATION_FILE"/></root>
+</configuration>

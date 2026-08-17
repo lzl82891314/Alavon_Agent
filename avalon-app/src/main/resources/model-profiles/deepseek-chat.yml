@@ -1,13 +1,14 @@
 # Template only: DeepSeek uses the shared OpenAI-compatible chat-completions gateway.
-modelId: deepseek-chat
-displayName: DeepSeek Chat Template
+modelId: deepseek-v4-flash
+displayName: DeepSeek V4 flash Template
 provider: deepseek
 protocol: OPENAI_COMPATIBLE_CHAT
-modelName: deepseek-chat
+modelName: deepseek-v4-flash
 temperature: 0.2
-enabled: false
+enabled: true
 providerOptions:
-  baseUrl: https://api.deepseek.com/v1
+  baseUrl: https://gcapi.cn/v1
   apiKeyEnv: DEEPSEEK_API_KEY
+  instructionRole: system
   response_format:
     type: json_object
