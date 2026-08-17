@@ -69,7 +69,6 @@ public final class PromptBuilder {
                       "mode": "...",
                       "objective": "...",
                       "unresolvedQuestions": [],
-                      "publicCommitments": [],
                       "coverStory": {},
                       "deceptionIntent": "NONE",
                       "consistencyRisks": []
@@ -81,7 +80,6 @@ public final class PromptBuilder {
                       "evidenceToWithhold": [],
                       "publicMessage": "..."
                     },
-                    "commitmentsToAdd": [],
                     "strategyMode": "...",
                     "lastSummary": "..."
                   },
@@ -97,14 +95,15 @@ public final class PromptBuilder {
                 json(request.getPrivateKnowledge()), json(request.getPublicState()),
                 request.getObservationFromSequence(), request.getObservationToSequence(), json(request.getObservationDelta()),
                 json(request.getMemory()), json(request.getStrategyContext()), json(request.getDiscussionDirective()),
-                actionContract(request.getAllowedActions())).strip();
+                actionContract(request.getAllowedActions())).strip()
+                .replace("publicCommitments", "accepted commitments are host-owned");
     }
 
     private String actionContract(List<String> allowedActions) {
         String type = allowedActions == null || allowedActions.size() != 1 ? null : allowedActions.get(0);
         if (type == null) return "{\"actionType\": \"one of allowedActions\"}";
         return switch (type) {
-            case "PUBLIC_SPEECH" -> "{\"actionType\":\"PUBLIC_SPEECH\",\"speechText\":\"...\",\"speechAct\":\"allowed speech act\",\"mentions\":[],\"replyToEventSequences\":[]}";
+            case "PUBLIC_SPEECH" -> "{\"actionType\":\"PUBLIC_SPEECH\",\"speechText\":\"...\",\"speechAct\":\"allowed speech act\",\"mentions\":[],\"replyToEventSequences\":[],\"supersedesSequence\":null}";
             case "TEAM_PROPOSAL" -> "{\"actionType\":\"TEAM_PROPOSAL\",\"selectedPlayerIds\":[\"exact required team size\"]}";
             case "TEAM_VOTE" -> "{\"actionType\":\"TEAM_VOTE\",\"vote\":\"APPROVE or REJECT\"}";
             case "MISSION_ACTION" -> "{\"actionType\":\"MISSION_ACTION\",\"choice\":\"SUCCESS or FAIL when role permits\"}";

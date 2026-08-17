@@ -4,6 +4,8 @@ import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.model.AuditReason;
 import com.example.avalon.core.player.memory.VisiblePlayerInfo;
 import com.example.avalon.core.game.model.PlayerTurnContext;
+import com.example.avalon.core.game.model.PlayerAction;
+import com.example.avalon.core.game.model.PublicSpeechAction;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -20,14 +22,17 @@ final class PrivateKnowledgeExpressionValidator {
             "大概率", "更可能", "如果", "若", "像是"
     );
 
-    void validate(PlayerTurnContext context, AgentTurnResult result) {
-        List<CandidateKnowledge> candidateKnowledge = candidateKnowledge(context);
-        if (candidateKnowledge.isEmpty() || result == null) {
+    void validate(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+        if (result == null) {
             return;
         }
+        List<CandidateKnowledge> candidateKnowledge = candidateKnowledge(context);
         validateText("privateThought", result.getPrivateThought(), candidateKnowledge);
-        validateText("publicSpeech", result.getPublicSpeech(), candidateKnowledge);
-        validateExactKnowledgeDisclosure(context, result.getPublicSpeech());
+        String publicSpeech = action instanceof PublicSpeechAction speech
+                ? speech.speechText()
+                : result.getPublicSpeech();
+        validateText("publicSpeech", publicSpeech, candidateKnowledge);
+        validateExactKnowledgeDisclosure(context, publicSpeech);
         AuditReason auditReason = result.getAuditReason();
         if (auditReason == null || auditReason.getReasonSummary() == null) {
             return;
@@ -42,7 +47,6 @@ final class PrivateKnowledgeExpressionValidator {
         for (VisiblePlayerInfo player : context.privateView().knowledge().visiblePlayers()) {
             if (player.exactRoleId() == null) continue;
             for (String clause : clauses(publicSpeech)) {
-                if (containsUncertaintyMarker(clause)) continue;
                 for (String playerAlias : playerAliases(player)) {
                     for (String roleAlias : roleAliases(player.exactRoleId())) {
                         if (containsCertainRoleAssertion(clause, playerAlias, roleAlias)) {
@@ -82,7 +86,7 @@ final class PrivateKnowledgeExpressionValidator {
         }
         for (String clause : clauses(text)) {
             String trimmedClause = clause.trim();
-            if (trimmedClause.isEmpty() || containsUncertaintyMarker(trimmedClause)) {
+            if (trimmedClause.isEmpty()) {
                 continue;
             }
             for (CandidateKnowledge knowledge : candidateKnowledge) {
@@ -115,8 +119,20 @@ final class PrivateKnowledgeExpressionValidator {
         if (playerId == null || roleAlias == null) {
             return false;
         }
-        return certaintyPattern(playerId, roleAlias).matcher(clause).find()
-                || certaintyPattern(roleAlias, playerId).matcher(clause).find();
+        return isCertainMatch(clause, certaintyPattern(playerId, roleAlias))
+                || isCertainMatch(clause, certaintyPattern(roleAlias, playerId));
+    }
+
+    private boolean isCertainMatch(String clause, Pattern pattern) {
+        java.util.regex.Matcher matcher = pattern.matcher(clause);
+        while (matcher.find()) {
+            int contextStart = Math.max(0, matcher.start() - 16);
+            String localContext = clause.substring(contextStart, matcher.end());
+            if (!containsUncertaintyMarker(localContext)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Pattern certaintyPattern(String left, String right) {
@@ -131,6 +147,7 @@ final class PrivateKnowledgeExpressionValidator {
     }
 
     private List<String> clauses(String text) {
+        text = text.replaceAll("\\u4f46(?:\\u662f)?|\\u540c\\u65f6|\\u800c", "\\n");
         String[] rawClauses = text.split("[\\r\\n。！？；;，,]");
         List<String> clauses = new ArrayList<>();
         for (String rawClause : rawClauses) {

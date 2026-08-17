@@ -41,10 +41,12 @@ public class AgentTurnRequestFactory {
         request.setProviderOptions(modelProfile(agentConfig).getProviderOptions());
         request.setPrivateKnowledge(privateKnowledge(context));
         request.setPublicState(publicState(context));
-        request.setMemory(memory(context));
+        Map<String, Object> memory = memory(context);
+        request.setMemory(memory);
         request.setStrategyContext(roleStrategyPlanner.plan(context, agentConfig));
         request.setObservationDelta(context.observations().events().stream()
                 .map(event -> objectMapper.convertValue(event, new TypeReference<Map<String, Object>>() { }))
+                .filter(event -> !memoryClaimSequences(memory).contains(sequenceOf(event)))
                 .toList());
         request.setObservationFromSequence(context.observations().fromSequenceExclusive());
         request.setObservationToSequence(context.observations().toSequenceInclusive());
@@ -54,6 +56,20 @@ public class AgentTurnRequestFactory {
         request.setRulesSummary(context.rulesSummary());
         request.setOutputSchemaVersion(defaultString(agentConfig.getOutputSchemaVersion(), "v1"));
         return request;
+    }
+
+    private java.util.Set<Long> memoryClaimSequences(Map<String, Object> memory) {
+        Object claims = memory.get("publicClaims");
+        if (!(claims instanceof List<?> values)) return java.util.Set.of();
+        return values.stream().filter(Map.class::isInstance).map(Map.class::cast)
+                .map(this::sequenceOf).filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private Long sequenceOf(Map<?, ?> value) {
+        Object sequence = value.get("sourceEventSequence");
+        if (!(sequence instanceof Number)) sequence = value.get("sequence");
+        return sequence instanceof Number number ? number.longValue() : null;
     }
 
     private Map<String, Object> privateKnowledge(PlayerTurnContext context) {

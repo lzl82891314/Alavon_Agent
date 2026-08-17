@@ -4,6 +4,7 @@ import com.example.avalon.agent.gateway.AgentGateway;
 import com.example.avalon.agent.gateway.OpenAiCompatibleResponseException;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
+import com.example.avalon.agent.strategy.RoleStrategyPolicy;
 import com.example.avalon.core.game.model.PlayerAction;
 import com.example.avalon.core.game.model.PlayerTurnContext;
 import org.springframework.stereotype.Component;
@@ -40,9 +41,9 @@ public class ValidationRetryPolicy {
             try {
                 AgentTurnResult result = agentGateway.playTurn(attemptRequest);
                 lastResult = result;
-                validateStrategicOutput(context, result);
                 PlayerAction action = responseParser.parse(context, result);
-                privateKnowledgeExpressionValidator.validate(context, result);
+                validateStrategicOutput(context, result, action);
+                privateKnowledgeExpressionValidator.validate(context, result, action);
                 return new ValidatedAgentTurn(result, action, attempts, attemptRequest.copy());
             } catch (RuntimeException exception) {
                 lastFailure = exception;
@@ -68,10 +69,11 @@ public class ValidationRetryPolicy {
         );
     }
 
-    private void validateStrategicOutput(PlayerTurnContext context, AgentTurnResult result) {
+    private void validateStrategicOutput(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
         if (result == null || result.getMemoryUpdate() == null) {
             throw new IllegalStateException("Strategic output must include memoryUpdate");
         }
+        validateStrategyContract(context, result, action);
         Map<Long, Object> availableEvidence = new java.util.LinkedHashMap<>();
         context.observations().events().forEach(event -> availableEvidence.put(event.sequence(), event));
         context.memoryState().worldFacts().forEach(fact -> addEvidence(availableEvidence, fact));
@@ -101,6 +103,43 @@ public class ValidationRetryPolicy {
             }
             validateBeliefChange(context, result, player, probability);
         });
+    }
+
+    private void validateStrategyContract(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+        Map<String, Object> strategy = result.getMemoryUpdate().getStrategyState();
+        Map<String, Object> communication = result.getMemoryUpdate().getCommunicationPlan();
+        requireNonBlank(strategy, "mode", "strategyState.mode");
+        requireNonBlank(strategy, "objective", "strategyState.objective");
+        if (action instanceof com.example.avalon.core.game.model.PublicSpeechAction speechAction) {
+            requireNonBlank(communication, "speechAct", "communicationPlan.speechAct");
+            Object plannedMessage = communication.get("publicMessage");
+            if (plannedMessage == null || !speechAction.speechText().trim().equals(String.valueOf(plannedMessage).trim())) {
+                throw new IllegalStateException("communicationPlan.publicMessage must match publicSpeech");
+            }
+            if (!speechAction.speechAct().equals(String.valueOf(communication.get("speechAct")))) {
+                throw new IllegalStateException("communicationPlan.speechAct must match the public action");
+            }
+        }
+        Object intentValue = strategy.get("deceptionIntent");
+        String intent = intentValue == null ? "NONE" : String.valueOf(intentValue).trim().toUpperCase(Locale.ROOT);
+        if (!RoleStrategyPolicy.permittedDeceptionIntents(context.roleId()).contains(intent)) {
+            throw new IllegalStateException("Deception intent is not permitted for role " + context.roleId() + ": " + intent);
+        }
+        if ("MERLIN".equalsIgnoreCase(context.roleId())) {
+            Object exposureRisk = strategy.get("exposureRisk");
+            if (!(exposureRisk instanceof Number number)
+                    || !Double.isFinite(number.doubleValue())
+                    || number.doubleValue() < 0.0d || number.doubleValue() > 1.0d) {
+                throw new IllegalStateException("Merlin exposureRisk must be a number between 0 and 1");
+            }
+        }
+    }
+
+    private void requireNonBlank(Map<String, Object> values, String key, String label) {
+        Object value = values.get(key);
+        if (value == null || String.valueOf(value).isBlank()) {
+            throw new IllegalStateException(label + " is required");
+        }
     }
 
     private void validateBeliefChange(PlayerTurnContext context,

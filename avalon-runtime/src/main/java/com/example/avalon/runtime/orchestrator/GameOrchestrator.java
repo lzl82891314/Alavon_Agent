@@ -317,12 +317,19 @@ public class GameOrchestrator {
 
     private void resolveMission(GameRuntimeState state) {
         long fails = state.currentMissionChoices().values().stream().filter(choice -> choice == MissionChoice.FAIL).count();
+        List<String> resolvedTeam = state.currentMissionTeam().stream()
+                .map(seat -> state.playerBySeat(seat).playerId())
+                .toList();
+        Map<String, Object> missionPayload = new LinkedHashMap<>();
+        missionPayload.put("roundNo", state.roundNo());
+        missionPayload.put("teamPlayerIds", resolvedTeam);
         if (fails >= ruleEngine.missionFailThresholdForRound(state)) {
             state.addFailedMissionRound(state.roundNo());
-            state.appendEvent("MISSION_FAILED", GamePhase.MISSION_RESOLUTION, "SYSTEM", Map.of("roundNo", state.roundNo(), "fails", fails));
+            missionPayload.put("fails", fails);
+            state.appendEvent("MISSION_FAILED", GamePhase.MISSION_RESOLUTION, "SYSTEM", missionPayload);
         } else {
             state.addApprovedMissionRound(state.roundNo());
-            state.appendEvent("MISSION_SUCCESS", GamePhase.MISSION_RESOLUTION, "SYSTEM", Map.of("roundNo", state.roundNo()));
+            state.appendEvent("MISSION_SUCCESS", GamePhase.MISSION_RESOLUTION, "SYSTEM", missionPayload);
         }
         state.clearProposalState();
         state.clearMissionState();
@@ -392,13 +399,15 @@ public class GameOrchestrator {
             payload.put("speechAct", speechAction.speechAct());
             payload.put("mentions", speechAction.mentions());
             payload.put("replyToEventSequences", speechAction.replyToEventSequences());
+            payload.put("supersedesSequence", speechAction.supersedesSequence());
         }
         state.appendEvent("PLAYER_ACTION", state.phase(), player.playerId(), payload);
-        RuntimeAuditEntry auditEntry = toAuditEntry(state.events().get(state.events().size() - 1), player, result);
+        GameEvent actionEvent = state.events().get(state.events().size() - 1);
+        RuntimeAuditEntry auditEntry = toAuditEntry(actionEvent, player, result);
         if (auditEntry != null) {
             state.appendAudit(auditEntry);
         }
-        commitAcceptedMemory(state, player, result);
+        commitAcceptedMemory(state, player, result, actionEvent.seqNo());
     }
 
     private void validateDiscussionAction(GameRuntimeState state,
@@ -429,7 +438,10 @@ public class GameOrchestrator {
         }
     }
 
-    private void commitAcceptedMemory(GameRuntimeState state, PlayerRegistration player, PlayerActionResult result) {
+    private void commitAcceptedMemory(GameRuntimeState state,
+                                      PlayerRegistration player,
+                                      PlayerActionResult result,
+                                      long sourceEventSequence) {
         if (result.memoryUpdate() == null) return;
         RoleAssignment assignment = state.requireRoleAssignmentBySeat(player.seatNo());
         Map<String, Object> payload = new LinkedHashMap<>(state.memoryOf(player.playerId()));
@@ -440,10 +452,115 @@ public class GameOrchestrator {
         payload.putIfAbsent("camp", assignment.camp().name());
         payload.putIfAbsent("updatedAt", state.updatedAt());
         PlayerMemoryState current = objectMapper.convertValue(payload, PlayerMemoryState.class);
-        PlayerMemoryState merged = current.merge(result.memoryUpdate(), java.time.Instant.now());
+        com.example.avalon.core.player.memory.MemoryUpdate acceptedUpdate = enrichPublicCommitment(
+                result.memoryUpdate(), result.action(), player.playerId(), current.commitments(),
+                state.roundNo(), sourceEventSequence);
+        PlayerMemoryState merged = current.merge(acceptedUpdate, java.time.Instant.now());
         Map<String, Object> stored = objectMapper.convertValue(merged, new TypeReference<Map<String, Object>>() { });
         state.memoryOf(player.playerId()).clear();
         state.memoryOf(player.playerId()).putAll(stored);
+    }
+
+    private com.example.avalon.core.player.memory.MemoryUpdate enrichPublicCommitment(
+            com.example.avalon.core.player.memory.MemoryUpdate update,
+            PlayerAction action,
+            String actorPlayerId,
+            List<String> existingCommitments,
+            int roundNo,
+            long sourceEventSequence) {
+        Map<String, Object> strategyState = new LinkedHashMap<>(update.strategyState());
+        strategyState.remove("publicCommitments");
+        List<String> hostCommitments = new ArrayList<>();
+        List<Map<String, Object>> hostPublicClaims = new ArrayList<>(update.publicClaimsToAdd());
+        if (action instanceof com.example.avalon.core.game.model.PublicSpeechAction speech
+                && speech.speechText() != null && !speech.speechText().isBlank()) {
+            Map<String, Object> publicStatement = publicStatement(speech, actorPlayerId, roundNo, sourceEventSequence);
+            hostPublicClaims.add(publicStatement);
+            if (List.of("DECLARE_VOTE_INTENT", "REVISE_POSITION").contains(speech.speechAct())) {
+                if ("REVISE_POSITION".equals(speech.speechAct())) {
+                    hostCommitments.addAll(revisedCommitments(existingCommitments, speech, sourceEventSequence));
+                }
+                hostCommitments.add(serializePublicStatement(publicStatement));
+            }
+        }
+        return new com.example.avalon.core.player.memory.MemoryUpdate(
+                update.suspicionDelta(), update.trustDelta(), update.observationsToAdd(), hostCommitments,
+                update.inferredFactsToAdd(), update.worldFactsToAdd(), hostPublicClaims,
+                update.roleBeliefs(), strategyState, update.communicationPlan(), update.evidenceReferences(),
+                update.beliefEvidenceReferences(), update.observedThroughSequence(), update.strategyMode(), update.lastSummary());
+    }
+
+    private List<String> revisedCommitments(
+            List<String> existingCommitments,
+            com.example.avalon.core.game.model.PublicSpeechAction revision,
+            long supersededBySequence) {
+        List<String> revised = new ArrayList<>();
+        List<Map<String, Object>> active = new ArrayList<>();
+        for (String commitment : existingCommitments) {
+            try {
+                Map<String, Object> value = objectMapper.readValue(commitment,
+                        new TypeReference<Map<String, Object>>() { });
+                if ("ACTIVE".equals(String.valueOf(value.get("status")))) {
+                    active.add(value);
+                }
+            } catch (Exception ignored) {
+                // Preserve legacy non-JSON commitment entries unchanged.
+            }
+        }
+        for (Map<String, Object> value : active) {
+            Object source = value.get("sourceEventSequence");
+            Long sourceSequence = source instanceof Number number ? number.longValue() : null;
+            boolean matches = revision.supersedesSequence() != null
+                    ? revision.supersedesSequence().equals(sourceSequence)
+                    : active.size() == 1 || targetsOverlap(value, revision.mentions());
+            if (!matches) continue;
+            value.put("status", "REVISED");
+            value.put("supersededBySequence", supersededBySequence);
+            try {
+                revised.add(objectMapper.writeValueAsString(value));
+            } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+                throw new IllegalStateException("Cannot serialize revised commitment", exception);
+            }
+        }
+        return revised;
+    }
+
+    private boolean targetsOverlap(Map<String, Object> commitment, List<String> revisionTargets) {
+        Object targets = commitment.get("targets");
+        if (!(targets instanceof List<?> values) || revisionTargets == null || revisionTargets.isEmpty()) {
+            return false;
+        }
+        return values.stream().map(String::valueOf).anyMatch(revisionTargets::contains);
+    }
+
+    private Map<String, Object> publicStatement(com.example.avalon.core.game.model.PublicSpeechAction speech,
+                                                String actorPlayerId,
+                                                int roundNo,
+                                                long sourceEventSequence) {
+        Map<String, Object> fact = new LinkedHashMap<>();
+        fact.put("type", "PUBLIC_STATEMENT");
+        fact.put("sequence", sourceEventSequence);
+        fact.put("sourceEventSequence", sourceEventSequence);
+        fact.put("actorPlayerId", actorPlayerId);
+        fact.put("eventType", "PLAYER_ACTION");
+        fact.put("roundNo", roundNo);
+        fact.put("speechAct", speech.speechAct());
+        fact.put("statement", speech.speechText());
+        fact.put("targets", speech.mentions());
+        fact.put("replyToEventSequences", speech.replyToEventSequences());
+        if (speech.supersedesSequence() != null) {
+            fact.put("supersedesSequence", speech.supersedesSequence());
+        }
+        fact.put("status", "ACTIVE");
+        return Map.copyOf(fact);
+    }
+
+    private String serializePublicStatement(Map<String, Object> fact) {
+        try {
+            return objectMapper.writeValueAsString(fact);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new IllegalStateException("Cannot serialize accepted public commitment", exception);
+        }
     }
 
     private PlayerActionResult actForPlayer(GameRuntimeState state,

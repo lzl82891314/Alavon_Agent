@@ -79,7 +79,7 @@ public record PlayerMemoryState(
         update.trustDelta().forEach((key, value) -> nextTrust.merge(key, value, Double::sum));
 
         List<String> nextObservations = appendStringsBounded(observations, update.observationsToAdd(), 80);
-        List<String> nextCommitments = appendStringsBounded(commitments, update.commitmentsToAdd(), 40);
+        List<String> nextCommitments = mergeCommitments(commitments, update.commitmentsToAdd(), 40);
         List<String> nextFacts = appendStringsBounded(inferredFacts, update.inferredFactsToAdd(), 80);
 
         List<Map<String, Object>> nextWorldFacts = appendBounded(worldFacts, update.worldFactsToAdd(), 120);
@@ -133,15 +133,64 @@ public record PlayerMemoryState(
     private static List<Map<String, Object>> appendBounded(List<Map<String, Object>> current,
                                                             List<Map<String, Object>> additions,
                                                             int limit) {
-        List<Map<String, Object>> combined = new ArrayList<>(current);
-        combined.addAll(additions);
+        java.util.Set<Long> knownSequences = new java.util.HashSet<>();
+        List<Map<String, Object>> combined = new ArrayList<>();
+        current.forEach(value -> {
+            java.util.Optional<Long> sequence = sequenceOf(value);
+            if (sequence.isEmpty() || knownSequences.add(sequence.get())) {
+                combined.add(value);
+            }
+        });
+        additions.forEach(value -> {
+            java.util.Optional<Long> sequence = sequenceOf(value);
+            if (sequence.isEmpty() || knownSequences.add(sequence.get())) {
+                combined.add(value);
+            }
+        });
         return List.copyOf(combined.subList(Math.max(0, combined.size() - limit), combined.size()));
+    }
+
+    private static java.util.Optional<Long> sequenceOf(Map<String, Object> value) {
+        if (value == null) return java.util.Optional.empty();
+        Object sequence = value.get("sourceEventSequence");
+        if (!(sequence instanceof Number)) sequence = value.get("sequence");
+        return sequence instanceof Number number
+                ? java.util.Optional.of(number.longValue())
+                : java.util.Optional.empty();
     }
 
     private static List<String> appendStringsBounded(List<String> current, List<String> additions, int limit) {
         List<String> combined = new ArrayList<>(current);
         additions.stream().map(value -> truncate(value, 500)).forEach(combined::add);
         return List.copyOf(combined.subList(Math.max(0, combined.size() - limit), combined.size()));
+    }
+
+    private static List<String> mergeCommitments(List<String> current, List<String> additions, int limit) {
+        List<String> merged = new ArrayList<>(current);
+        for (String addition : additions) {
+            java.util.Optional<Long> sequence = commitmentSequence(addition);
+            if (sequence.isPresent()) {
+                boolean replaced = false;
+                for (int index = 0; index < merged.size(); index++) {
+                    if (commitmentSequence(merged.get(index)).equals(sequence)) {
+                        merged.set(index, addition);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (replaced) continue;
+            }
+            merged.add(truncate(addition, 500));
+        }
+        return List.copyOf(merged.subList(Math.max(0, merged.size() - limit), merged.size()));
+    }
+
+    private static java.util.Optional<Long> commitmentSequence(String value) {
+        if (value == null) return java.util.Optional.empty();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\\\"sourceEventSequence\\\"\\s*:\\s*(\\d+)")
+                .matcher(value);
+        return matcher.find() ? java.util.Optional.of(Long.parseLong(matcher.group(1))) : java.util.Optional.empty();
     }
 
     private static String truncate(String value, int maxLength) {

@@ -20,7 +20,7 @@ public final class RoleStrategyPlanner {
         policy.put("camp", context.privateView().camp().name());
         policy.put("objectives", objectives(role));
         policy.put("constraints", constraints(role));
-        policy.put("permittedDeceptionIntents", deceptionIntents(role));
+        policy.put("permittedDeceptionIntents", RoleStrategyPolicy.permittedDeceptionIntents(role));
         policy.put("decisionQuestions", decisionQuestions(role, context.phase()));
         policy.put("existingCommitments", context.memoryState().commitments());
         policy.put("priorStrategy", context.memoryState().strategyState());
@@ -50,17 +50,6 @@ public final class RoleStrategyPlanner {
             case "OBERON" -> List.of("do not claim knowledge of evil teammates", "do not coordinate from hidden information");
             case "MORGANA", "ASSASSIN", "MORDRED" -> List.of("do not reveal the evil roster", "explain or deliberately manage departures from public commitments");
             default -> List.of("public claims are not world facts", "large belief changes require visible evidence");
-        };
-    }
-
-    private List<String> deceptionIntents(String role) {
-        return switch (role) {
-            case "MERLIN" -> List.of("NONE", "WITHHOLD_PRIVATE_KNOWLEDGE", "UNDERSTATE_CONFIDENCE");
-            case "PERCIVAL" -> List.of("NONE", "WITHHOLD_PRIVATE_KNOWLEDGE", "BAIT_ASSASSIN");
-            case "MORGANA" -> List.of("NONE", "OVERSTATE_SUSPICION", "CREATE_ALTERNATIVE_EXPLANATION", "DISTANCE_FROM_TEAMMATE", "BUILD_FALSE_CREDIBILITY");
-            case "ASSASSIN", "MORDRED" -> List.of("NONE", "OVERSTATE_SUSPICION", "CREATE_ALTERNATIVE_EXPLANATION", "DISTANCE_FROM_TEAMMATE");
-            case "OBERON" -> List.of("NONE", "OVERSTATE_SUSPICION", "CREATE_ALTERNATIVE_EXPLANATION", "BUILD_FALSE_CREDIBILITY");
-            default -> List.of("NONE");
         };
     }
 

@@ -51,7 +51,7 @@ public final class NoopAgentGateway implements AgentGateway {
         for (Map<String, Object> event : request.getObservationDelta()) {
             String type = String.valueOf(event.get("eventType"));
             if ("MISSION_FAILED".equals(type)) {
-                currentTeam(request).forEach(player -> beliefs.computeIfPresent(player,
+                missionTeam(event, request).forEach(player -> beliefs.computeIfPresent(player,
                         (ignored, value) -> Math.min(0.9d, value + 0.15d)));
             }
         }
@@ -86,14 +86,18 @@ public final class NoopAgentGateway implements AgentGateway {
         }
         update.setBeliefEvidenceReferences(beliefEvidence);
         update.setStrategyMode("INFORMATION_SEEKING");
-        update.setStrategyState(Map.of(
-                "mode", "INFORMATION_SEEKING",
-                "objective", "test the highest-risk public hypothesis",
-                "unresolvedQuestions", List.of(),
-                "publicCommitments", List.of(),
-                "coverStory", Map.of(),
-                "deceptionIntent", "NONE",
-                "consistencyRisks", List.of()));
+        Map<String, Object> strategy = new LinkedHashMap<>();
+        strategy.put("mode", "INFORMATION_SEEKING");
+        strategy.put("objective", "test the highest-risk public hypothesis");
+        strategy.put("unresolvedQuestions", List.of());
+        strategy.put("publicCommitments", List.of());
+        strategy.put("coverStory", Map.of());
+        strategy.put("deceptionIntent", "NONE");
+        strategy.put("consistencyRisks", List.of());
+        if ("MERLIN".equalsIgnoreCase(request.getRoleId())) {
+            strategy.put("exposureRisk", 0.0d);
+        }
+        update.setStrategyState(strategy);
         update.setCommunicationPlan(Map.of(
                 "speechAct", speechAct(request),
                 "desiredAudienceBeliefs", Map.of(),
@@ -194,6 +198,15 @@ public final class NoopAgentGateway implements AgentGateway {
     @SuppressWarnings("unchecked")
     private List<String> currentTeam(AgentTurnRequest request) {
         return (List<String>) request.getPublicState().getOrDefault("currentTeamPlayerIds", List.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> missionTeam(Map<String, Object> event, AgentTurnRequest request) {
+        Object team = event.get("teamPlayerIds");
+        if (team instanceof List<?> values) {
+            return values.stream().map(String::valueOf).toList();
+        }
+        return currentTeam(request);
     }
 
     private String write(Object value) {

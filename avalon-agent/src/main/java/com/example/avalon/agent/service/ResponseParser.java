@@ -43,7 +43,9 @@ public class ResponseParser {
             List<Long> replies = new ArrayList<>();
             root.path("replyToEventSequences").forEach(node -> replies.add(node.asLong()));
             validateDiscussionDirective(context, speechAct, mentions, replies);
-            return new PublicSpeechAction(speech, speechAct, mentions, replies);
+            Long supersedesSequence = root.has("supersedesSequence") && root.get("supersedesSequence").canConvertToLong()
+                    ? root.get("supersedesSequence").longValue() : null;
+            return new PublicSpeechAction(speech, speechAct, mentions, replies, supersedesSequence);
         }
 
         JsonNode root = readAction(turnResult.getActionJson());
