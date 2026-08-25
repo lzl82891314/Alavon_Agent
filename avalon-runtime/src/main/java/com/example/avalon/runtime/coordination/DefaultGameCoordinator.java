@@ -13,13 +13,13 @@ import com.example.avalon.runtime.service.TurnContextBuilder;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.Comparator;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /** Single entry point for advancing a game and committing action batches. */
 public final class DefaultGameCoordinator implements GameCoordinator {
@@ -55,7 +55,17 @@ public final class DefaultGameCoordinator implements GameCoordinator {
         Optional<ActionBatch> existing = collector.findActive(gameId);
         if (existing.isPresent()) {
             ActionBatch batch = existing.get();
-            if (!batch.isComplete()) return new AdvanceResult(state, requirementFor(state), batch, false, "waiting for action submissions");
+            if (!batch.isComplete()) {
+                batch = dispatchAutomatic(state, batch);
+                if (state.status() != GameStatus.RUNNING) {
+                    return new AdvanceResult(state, requirementFor(state), batch, true,
+                            "game paused after controller failure");
+                }
+                if (!batch.isComplete()) {
+                    return new AdvanceResult(state, requirementFor(state), batch, false,
+                            "waiting for action submissions");
+                }
+            }
             commit(state, batch);
             return new AdvanceResult(state, requirementFor(state), batch, true, "action batch committed");
         }
@@ -67,6 +77,10 @@ public final class DefaultGameCoordinator implements GameCoordinator {
         if (requirement instanceof TerminalRequirement) return new AdvanceResult(state, requirement, null, false, "game ended");
         ActionBatch batch = collector.open(requirement);
         batch = dispatchAutomatic(state, batch);
+        if (state.status() != GameStatus.RUNNING) {
+            return new AdvanceResult(state, requirementFor(state), batch, true,
+                    "game paused after controller failure");
+        }
         if (batch.isComplete()) {
             commit(state, batch);
             return new AdvanceResult(state, requirementFor(state), batch, true, "action batch committed");
@@ -90,33 +104,78 @@ public final class DefaultGameCoordinator implements GameCoordinator {
 
     private ActionBatch dispatchAutomatic(GameRuntimeState state, ActionBatch batch) {
         Map<String, FrozenControllerInvocation> frozenInvocations = new LinkedHashMap<>();
-        for (String playerId : batch.requiredPlayers().stream().sorted().toList()) {
+        for (String playerId : batch.missingPlayers().stream().sorted().toList()) {
             PlayerRegistration player = state.playerById(playerId);
             if (player.controllerType() == com.example.avalon.core.player.enums.PlayerControllerType.HUMAN) continue;
             PlayerController controller = controllers.resolve(state, player);
             frozenInvocations.put(playerId, new FrozenControllerInvocation(playerId, controller, contexts.build(state, player)));
         }
-        List<GeneratedAction> results = frozenInvocations.values().stream()
-                .map(invocation -> CompletableFuture.supplyAsync(
-                        () -> new GeneratedAction(invocation.playerId(), invocation.controller().act(invocation.context())), agentExecutor))
-                .toList()
-                .stream()
-                .map(CompletableFuture::join)
-                .sorted(Comparator.comparing(GeneratedAction::playerId))
-                .toList();
+        BlockingQueue<CompletedAction> completedActions = new LinkedBlockingQueue<>();
+        frozenInvocations.values().forEach(invocation -> CompletableFuture.supplyAsync(
+                        () -> new GeneratedAction(invocation.playerId(), invocation.controller().act(invocation.context())),
+                        agentExecutor)
+                .whenComplete((generated, failure) -> completedActions.add(
+                        new CompletedAction(invocation.playerId(), generated, failure))));
         ActionBatch current = batch;
-        for (GeneratedAction generated : results) {
-            current = collector.submit(new ActionSubmission(current.batchId(), generated.playerId(), generated.result().action(),
-                    current.batchId() + ":" + generated.playerId(), current.batchVersion(),
-                    current.batchId() + ":" + generated.playerId(), Instant.now(), generated.result())).batch();
+        FailedAction firstLlmFailure = null;
+        RuntimeException firstUnexpectedFailure = null;
+        for (int completed = 0; completed < frozenInvocations.size(); completed++) {
+            CompletedAction completedAction;
+            try {
+                completedAction = completedActions.take();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for automatic controller", exception);
+            }
+            if (completedAction.failure() == null) {
+                GeneratedAction generated = completedAction.generated();
+                current = collector.submit(new ActionSubmission(current.batchId(), generated.playerId(), generated.result().action(),
+                        current.batchId() + ":" + generated.playerId(), current.batchVersion(),
+                        current.batchId() + ":" + generated.playerId(), Instant.now(), generated.result())).batch();
+            } else {
+                Throwable cause = unwrapCompletionFailure(completedAction.failure());
+                if (cause instanceof com.example.avalon.core.player.controller.PlayerActionGenerationException failure
+                        && state.playerById(completedAction.playerId()).controllerType()
+                        == com.example.avalon.core.player.enums.PlayerControllerType.LLM) {
+                    if (firstLlmFailure == null) {
+                        firstLlmFailure = new FailedAction(completedAction.playerId(), failure);
+                    }
+                } else if (firstUnexpectedFailure == null) {
+                    firstUnexpectedFailure = cause instanceof RuntimeException runtimeException
+                            ? runtimeException
+                            : new IllegalStateException("Automatic controller failed", cause);
+                }
+            }
+        }
+        if (firstUnexpectedFailure != null) {
+            throw firstUnexpectedFailure;
+        }
+        if (firstLlmFailure != null) {
+            orchestrator.pauseForLlmFailure(
+                    state,
+                    state.playerById(firstLlmFailure.playerId()),
+                    firstLlmFailure.failure());
         }
         return current;
+    }
+
+    private Throwable unwrapCompletionFailure(Throwable failure) {
+        return failure instanceof CompletionException && failure.getCause() != null
+                ? failure.getCause()
+                : failure;
     }
 
     private record FrozenControllerInvocation(String playerId, PlayerController controller,
                                               com.example.avalon.core.game.model.PlayerTurnContext context) { }
 
     private record GeneratedAction(String playerId, PlayerActionResult result) { }
+
+    private record CompletedAction(String playerId, GeneratedAction generated, Throwable failure) { }
+
+    private record FailedAction(
+            String playerId,
+            com.example.avalon.core.player.controller.PlayerActionGenerationException failure
+    ) { }
 
     private void commit(GameRuntimeState state, ActionBatch batch) {
         if (batch.sourceGameVersion() != state.events().size()) {

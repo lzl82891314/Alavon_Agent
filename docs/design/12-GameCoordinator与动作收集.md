@@ -610,9 +610,11 @@ CANCEL_GAME
 
 - 只重试缺失或失败的参与者。
 - 已验证提交保持不变。
+- 并行 Controller 必须在各自成功后立即提交，不能等待整个 Future 集合成功后再统一写入。
 - 不让后续重试看到已提交内容。
 - 重试耗尽后暂停游戏。
 - 不自动替玩家选择 APPROVE、REJECT、SUCCESS 或 FAIL。
+- 本地自动调度使用有界并发；同一模型池复用单个 Provider 时，默认并发度应低于玩家数，避免一次秘密投票形成 Provider 突发流量。
 
 ## 18. 混合 Controller Batch
 

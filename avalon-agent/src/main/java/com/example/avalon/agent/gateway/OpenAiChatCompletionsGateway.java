@@ -2,8 +2,6 @@ package com.example.avalon.agent.gateway;
 
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
-import com.example.avalon.agent.model.AuditReason;
-import com.example.avalon.agent.model.MemoryUpdate;
 import com.example.avalon.agent.model.RawCompletionMetadata;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -16,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,17 +24,18 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpenAiChatCompletionsGateway.class);
     private static final String GATEWAY_TYPE = "openai-compatible";
     private static final String DEFAULT_MODEL = "gpt-5.2";
-    private static final String OPTIONAL_SECTION_WARNINGS = "optionalSectionWarnings";
-
     private final OpenAiHttpTransport transport;
     private final ModelProfileApiKeyResolver apiKeyResolver;
+    private final ModelStreamEventPublisher streamEvents;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     @Autowired
     public OpenAiChatCompletionsGateway(OpenAiHttpTransport transport,
-                                        ModelProfileApiKeyResolver apiKeyResolver) {
+                                        ModelProfileApiKeyResolver apiKeyResolver,
+                                        ModelStreamEventPublisher streamEvents) {
         this.transport = transport;
         this.apiKeyResolver = apiKeyResolver;
+        this.streamEvents = streamEvents;
     }
 
     OpenAiChatCompletionsGateway(OpenAiHttpTransport transport,
@@ -52,7 +50,7 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
                 apiKey = environmentLookup.apply(ModelProfileSecretSupport.DEFAULT_SHARED_ENV_VAR);
             }
             return apiKey;
-        });
+        }, ModelStreamEventPublisher.noop());
     }
 
     @Override
@@ -64,26 +62,62 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
     public AgentTurnResult playTurn(AgentTurnRequest request) {
         RequestSettings settings = requestSettings(request);
         long startedAt = System.nanoTime();
+        String callId = streamEvents.started(request);
         LOGGER.info("model_call_start gameId={} playerId={} phase={} modelId={} provider={} endpoint={} timeoutMs={}",
                 request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
                 request.getProvider(), OpenAiCompatibleSupport.endpointUri(settings.baseUrl()), settings.timeout().toMillis());
-        JsonNode response;
+        OpenAiChatSseAccumulator accumulator = new OpenAiChatSseAccumulator(
+                objectMapper, request, streamEvents, callId, startedAt);
+        SseHttpResponse streamResponse;
         try {
-            response = transport.postChatCompletion(
+            streamResponse = transport.postEventStream(
                     OpenAiCompatibleSupport.endpointUri(settings.baseUrl()),
                     headers(settings),
                     requestBody(request),
-                    settings.timeout()
+                    settings.timeout(),
+                    accumulator::accept
             );
-        } catch (RuntimeException exception) {
+        } catch (OpenAiCompatibleTransportException exception) {
+            streamEvents.failed(callId, request, startedAt);
             LOGGER.error("model_call_failed gameId={} playerId={} phase={} modelId={} elapsedMs={} error={}",
                     request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
                     elapsedMillis(startedAt), exception.getMessage());
-            throw transportException(request, exception);
+            throw OpenAiCompatibleSupport.transportResponseException(
+                    request, exception, providerId(request), defaultModel(request.getModelName()));
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, providerId(request), defaultModel(request.getModelName()),
+                    "invalid_stream_frame");
         }
-        LOGGER.info("model_call_response gameId={} playerId={} phase={} modelId={} elapsedMs={} responseReceived=true",
-                request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(), elapsedMillis(startedAt));
-        return parseResponse(request, response);
+        JsonNode response;
+        try {
+            response = accumulator.response();
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, providerId(request), defaultModel(request.getModelName()),
+                    "stream_interrupted");
+        }
+        AgentTurnResult result;
+        try {
+            result = parseResponse(request, response);
+            result.getModelMetadata().getAttributes().put("streaming", true);
+            result.getModelMetadata().getAttributes().put("transportAttempts", streamResponse.transportAttempts());
+            result.getModelMetadata().getAttributes().put("reasoningChars", accumulator.reasoningChars());
+            putIfNotNull(result.getModelMetadata().getAttributes(),
+                    "firstReasoningDeltaMs", accumulator.firstReasoningDeltaMs());
+            putIfNotNull(result.getModelMetadata().getAttributes(),
+                    "firstContentDeltaMs", accumulator.firstContentDeltaMs());
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw exception;
+        }
+        streamEvents.completed(callId, request, startedAt, streamResponse.transportAttempts());
+        LOGGER.info("model_call_response gameId={} playerId={} phase={} modelId={} elapsedMs={} streaming=true transportAttempts={}",
+                request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
+                elapsedMillis(startedAt), streamResponse.transportAttempts());
+        return result;
     }
 
     private long elapsedMillis(long startedAt) {
@@ -109,6 +143,8 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
         );
         ObjectNode root = objectMapper.createObjectNode();
         root.put("model", defaultModel(request.getModelName()));
+        root.put("stream", true);
+        root.putObject("stream_options").put("include_usage", true);
         ArrayNode messages = root.putArray("messages");
         messages.addObject()
                 .put("role", OpenAiCompatibleSupport.instructionRole(request.getProvider(), providerOptions))
@@ -150,23 +186,10 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
 
             AgentTurnResult result = new AgentTurnResult();
             result.setPublicSpeech(textOrNull(payload.path("publicSpeech")));
-            result.setPrivateThought(textOrFallback(payload.path("privateThought"), analysis.reasoningDetailsPreview()));
+            result.setPrivateThought(textOrNull(payload.path("privateThought")));
             result.setActionJson(actionJson(payload));
-            OptionalSectionParse<AuditReason> auditReason = parseOptionalSection(payload, "auditReason", AuditReason.class);
-            if (auditReason.value() != null) {
-                result.setAuditReason(auditReason.value());
-            }
-            OptionalSectionParse<MemoryUpdate> memoryUpdate = parseOptionalSection(payload, "memoryUpdate", MemoryUpdate.class);
-            if (memoryUpdate.value() != null) {
-                result.setMemoryUpdate(memoryUpdate.value());
-            }
             RawCompletionMetadata metadata = metadata(request, response, choice, analysis);
-            List<Map<String, Object>> optionalSectionWarnings = new ArrayList<>();
-            optionalSectionWarnings.addAll(auditReason.warnings());
-            optionalSectionWarnings.addAll(memoryUpdate.warnings());
-            if (!optionalSectionWarnings.isEmpty()) {
-                metadata.getAttributes().put(OPTIONAL_SECTION_WARNINGS, List.copyOf(optionalSectionWarnings));
-            }
+            OpenAiCompatibleSupport.parseOptionalSections(objectMapper, payload, result, metadata);
             result.setModelMetadata(metadata);
             return result;
         } catch (RuntimeException exception) {
@@ -187,37 +210,6 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Failed to serialize action payload from OpenAI-compatible response", exception);
         }
-    }
-
-    private <T> T convertValue(JsonNode node, Class<T> type) {
-        try {
-            return objectMapper.treeToValue(node, type);
-        } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("Failed to convert OpenAI-compatible payload section to " + type.getSimpleName(), exception);
-        }
-    }
-
-    private <T> OptionalSectionParse<T> parseOptionalSection(JsonNode payload, String fieldName, Class<T> type) {
-        JsonNode sectionNode = payload.get(fieldName);
-        if (sectionNode == null || sectionNode.isNull() || sectionNode.isMissingNode()) {
-            return OptionalSectionParse.empty();
-        }
-        if (!sectionNode.isObject()) {
-            return OptionalSectionParse.warning(optionalSectionWarning(fieldName, "expected_json_object", sectionNode));
-        }
-        try {
-            return OptionalSectionParse.value(convertValue(sectionNode, type));
-        } catch (RuntimeException exception) {
-            return OptionalSectionParse.warning(optionalSectionWarning(fieldName, "dto_conversion_failed", sectionNode));
-        }
-    }
-
-    private Map<String, Object> optionalSectionWarning(String fieldName, String reason, JsonNode sectionNode) {
-        Map<String, Object> warning = new LinkedHashMap<>();
-        warning.put("field", fieldName);
-        warning.put("reason", reason);
-        warning.put("contentPreview", OpenAiCompatibleSupport.contentPreview(sectionNode == null ? null : sectionNode.toString()));
-        return warning;
     }
 
     private RawCompletionMetadata metadata(AgentTurnRequest request,
@@ -304,31 +296,14 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
         );
     }
 
-    private OpenAiCompatibleResponseException transportException(AgentTurnRequest request, RuntimeException exception) {
-        if (exception instanceof OpenAiCompatibleResponseException compatibleResponseException) {
-            return compatibleResponseException;
-        }
-        Map<String, Object> diagnostics = exception instanceof OpenAiCompatibleTransportException transportException
-                ? transportException.diagnostics()
-                : Map.of("failureDomain", "transport");
-        return new OpenAiCompatibleResponseException(
-                exception.getMessage() == null ? "OpenAI-compatible HTTP transport failed" : exception.getMessage(),
-                exception,
-                providerId(request),
-                defaultModel(request.getModelName()),
-                null,
-                null,
-                diagnostics
-        );
-    }
-
     private String developerPrompt(AgentTurnRequest request) {
         StringBuilder builder = new StringBuilder("""
                 你负责一个信息不完全的阿瓦隆战略 Agent。
                 严格区分规则事实、其他玩家的公开主张和自己的私有信念；公开主张不自动为真。
                 根据可见 sequence 证据更新概率、跨回合目标、公开承诺和叙事计划。
                 角色策略允许时可以进行游戏内隐瞒或误导，但不得泄露私有身份知识或访问不可见信息。
-                返回一个 JSON 对象，必须同时包含 memoryUpdate 和合法 action；不要输出原始思维链或 JSON 外文本。
+                所有公开发言和 privateThought 必须使用简体中文；JSON 字段名和枚举仍按契约输出。
+                返回一个 JSON 对象，必须包含合法 action；memoryUpdate 是可选认知草稿，无法保证合法时应省略；不要输出原始思维链或 JSON 外文本。
                 """.strip());
         if ("minimax".equals(providerId(request))) {
             builder.append(System.lineSeparator())
@@ -376,17 +351,4 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
     ) {
     }
 
-    record OptionalSectionParse<T>(T value, List<Map<String, Object>> warnings) {
-        private static <T> OptionalSectionParse<T> empty() {
-            return new OptionalSectionParse<>(null, List.of());
-        }
-
-        private static <T> OptionalSectionParse<T> value(T value) {
-            return new OptionalSectionParse<>(value, List.of());
-        }
-
-        private static <T> OptionalSectionParse<T> warning(Map<String, Object> warning) {
-            return new OptionalSectionParse<>(null, List.of(warning));
-        }
-    }
 }

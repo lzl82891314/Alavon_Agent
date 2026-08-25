@@ -2,6 +2,7 @@ package com.example.avalon.agent.service;
 
 import com.example.avalon.agent.gateway.AgentGateway;
 import com.example.avalon.agent.gateway.OpenAiCompatibleResponseException;
+import com.example.avalon.agent.gateway.OpenAiCompatibleTransportException;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.strategy.RoleStrategyPolicy;
@@ -14,11 +15,16 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Component
 public class ValidationRetryPolicy {
     private static final Logger LOGGER = LoggerFactory.getLogger(ValidationRetryPolicy.class);
     private static final int DEFAULT_MAX_ATTEMPTS = 2;
+    private static final String OPTIONAL_SECTION_WARNINGS = "optionalSectionWarnings";
+    private static final Pattern CHINESE_CHARACTER = Pattern.compile("[\\p{IsHan}]");
+    private static final Pattern ENGLISH_WORD = Pattern.compile("[A-Za-z]{2,}");
+    private static final Pattern PLAYER_ID = Pattern.compile("(?i)\\bP\\d+\\b");
     private static final double INITIAL_PRIOR_MAX_DISTANCE = 0.15d;
     private static final double NO_EVIDENCE_MAX_DELTA = 0.05d;
     private static final double EVIDENCE_MAX_DELTA = 0.25d;
@@ -45,8 +51,8 @@ public class ValidationRetryPolicy {
                 AgentTurnResult result = agentGateway.playTurn(attemptRequest);
                 lastResult = result;
                 PlayerAction action = responseParser.parse(context, result);
-                validateStrategicOutput(context, result, action);
-                privateKnowledgeExpressionValidator.validate(context, result, action);
+                validateRequiredOutput(context, result, action);
+                validateOptionalOutput(context, result, action);
                 return new ValidatedAgentTurn(result, action, attempts, attemptRequest.copy());
             } catch (RuntimeException exception) {
                 lastFailure = exception;
@@ -76,10 +82,33 @@ public class ValidationRetryPolicy {
         );
     }
 
-    private void validateStrategicOutput(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
-        if (result == null || result.getMemoryUpdate() == null) {
-            throw new IllegalStateException("Strategic output must include memoryUpdate");
+    private void validateRequiredOutput(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+        if (action instanceof com.example.avalon.core.game.model.PublicSpeechAction speechAction) {
+            requireSimplifiedChinese(speechAction.speechText(), "Public speech");
         }
+        privateKnowledgeExpressionValidator.validatePublicAction(context, result, action);
+    }
+
+    private void validateOptionalOutput(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+        try {
+            privateKnowledgeExpressionValidator.validatePrivateSections(context, result);
+        } catch (RuntimeException exception) {
+            result.setPrivateThought(null);
+            result.setAuditReason(null);
+            discardOptionalSection(context, result, "privateThought/auditReason", exception);
+        }
+        if (result.getMemoryUpdate() == null) {
+            return;
+        }
+        try {
+            validateCognitionDraft(context, result, action);
+        } catch (RuntimeException exception) {
+            result.setMemoryUpdate(null);
+            discardOptionalSection(context, result, "memoryUpdate", exception);
+        }
+    }
+
+    private void validateCognitionDraft(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
         validateStrategyContract(context, result, action);
         Map<Long, Object> availableEvidence = new java.util.LinkedHashMap<>();
         context.observations().events().forEach(event -> availableEvidence.put(event.sequence(), event));
@@ -142,10 +171,42 @@ public class ValidationRetryPolicy {
         }
     }
 
+    private void discardOptionalSection(PlayerTurnContext context, AgentTurnResult result,
+                                        String section, RuntimeException failure) {
+        Map<String, Object> attributes = result.getModelMetadata().getAttributes();
+        Object existing = attributes.get(OPTIONAL_SECTION_WARNINGS);
+        List<Map<String, Object>> warnings = new java.util.ArrayList<>();
+        if (existing instanceof Iterable<?> values) {
+            for (Object value : values) {
+                if (value instanceof Map<?, ?> map) {
+                    Map<String, Object> copy = new java.util.LinkedHashMap<>();
+                    map.forEach((key, item) -> copy.put(String.valueOf(key), item));
+                    warnings.add(Map.copyOf(copy));
+                }
+            }
+        }
+        Map<String, Object> warning = new java.util.LinkedHashMap<>();
+        warning.put("field", section);
+        warning.put("reason", "semantic_validation_failed");
+        warning.put("message", failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
+        warnings.add(Map.copyOf(warning));
+        attributes.put(OPTIONAL_SECTION_WARNINGS, List.copyOf(warnings));
+        LOGGER.warn("agent_optional_section_discarded gameId={} playerId={} phase={} section={} error={}",
+                context.gameId(), context.playerId(), context.phase(), section, warning.get("message"));
+    }
+
     private void requireNonBlank(Map<String, Object> values, String key, String label) {
         Object value = values.get(key);
         if (value == null || String.valueOf(value).isBlank()) {
             throw new IllegalStateException(label + " is required");
+        }
+    }
+
+    private void requireSimplifiedChinese(String value, String label) {
+        String withoutPlayerIds = PLAYER_ID.matcher(value == null ? "" : value).replaceAll("");
+        if (!CHINESE_CHARACTER.matcher(withoutPlayerIds).find()
+                || ENGLISH_WORD.matcher(withoutPlayerIds).find()) {
+            throw new IllegalStateException(label + " must use Simplified Chinese");
         }
     }
 
@@ -219,7 +280,7 @@ public class ValidationRetryPolicy {
 
     private AgentTurnRequest nextAttemptRequest(AgentTurnRequest request, RuntimeException failure) {
         AgentTurnRequest next = request.copy();
-        String correctivePrompt = correctivePrompt(failure, next.getAllowedActions());
+        String correctivePrompt = correctivePrompt(failure, next);
         if (correctivePrompt != null && !correctivePrompt.isBlank()) {
             next.setPromptText(appendPrompt(next.getPromptText(), correctivePrompt));
         }
@@ -230,10 +291,18 @@ public class ValidationRetryPolicy {
         if (failure instanceof CandidateKnowledgeAssertionException) {
             return true;
         }
+        if (failure instanceof OpenAiCompatibleTransportException transportException) {
+            return "stream_interrupted".equalsIgnoreCase(
+                    stringValue(transportException.diagnostics().get("failureKind")));
+        }
         if (!(failure instanceof OpenAiCompatibleResponseException responseException)) {
             return true;
         }
         String failureDomain = stringValue(responseException.diagnostics().get("failureDomain"));
+        String failureKind = stringValue(responseException.diagnostics().get("failureKind"));
+        if ("stream_interrupted".equalsIgnoreCase(failureKind)) {
+            return true;
+        }
         if ("transport".equalsIgnoreCase(failureDomain)) {
             return false;
         }
@@ -250,7 +319,8 @@ public class ValidationRetryPolicy {
         return originalPrompt + System.lineSeparator() + System.lineSeparator() + correctivePrompt;
     }
 
-    private String correctivePrompt(RuntimeException failure, List<String> allowedActions) {
+    private String correctivePrompt(RuntimeException failure, AgentTurnRequest request) {
+        List<String> allowedActions = request.getAllowedActions();
         if (failure instanceof CandidateKnowledgeAssertionException knowledgeAssertionException) {
             return """
                     上一轮输出把候选身份说成了确定事实，请重新生成并严格遵守：
@@ -265,8 +335,27 @@ public class ValidationRetryPolicy {
             ).strip();
         }
         if (!(failure instanceof OpenAiCompatibleResponseException responseException)) {
+            if (failure.getMessage() != null && failure.getMessage().endsWith(" must use Simplified Chinese")) {
+                return "上一轮公开发言包含英文句子。重新生成时，publicSpeech 必须使用简体中文；"
+                        + "只允许 P1 之类的玩家编号以及 JSON 字段名和枚举保留英文。请返回合法 action。";
+            }
+            if (failure.getMessage() != null
+                    && failure.getMessage().startsWith("Role belief contradicts private camp knowledge for ")) {
+                return "上一轮 roleBeliefs 与私有确定知识冲突。重新生成时必须逐字遵守这些固定值："
+                        + privateCampBeliefs(request)
+                        + "。这些值不需要公开说出，但 memoryUpdate.roleBeliefs 中不得改成中间概率。"
+                        + " action 仍然必须合法，且 " + actionRequirement(allowedActions) + "。";
+            }
+            if (failure.getMessage() != null
+                    && failure.getMessage().startsWith("Role belief changed too far without sufficient evidence for ")) {
+                String playerId = failure.getMessage().substring(failure.getMessage().lastIndexOf(' ') + 1);
+                return "上一轮 roleBeliefs 中 " + playerId + " 的变化超过宿主允许范围。"
+                        + "重新生成时必须把 " + playerId + " 限制在 " + beliefRange(request, playerId)
+                        + "；其他没有直接证据的未知玩家也应保持既有值。"
+                        + " action 仍然必须合法，且 " + actionRequirement(allowedActions) + "。";
+            }
             return "上一轮战略输出未通过宿主校验：" + failure.getMessage()
-                    + "。请保留基于可见证据的策略，修正字段后重新返回完整 memoryUpdate 和合法 action。";
+                    + "。请修正并重新返回合法 action；memoryUpdate 是可选认知草稿，无法保证合法时应省略。";
         }
         String finishReason = stringValue(responseException.diagnostics().get("finishReason"));
         String contentShape = stringValue(responseException.diagnostics().get("assistantContentShape"));
@@ -275,8 +364,8 @@ public class ValidationRetryPolicy {
             return """
                     上一轮输出没有满足结构化要求。请压缩措辞后重新生成完整战略 JSON：
                     - 最终回复只能是一个 JSON 对象，首字符必须是 {，尾字符必须是 }
-                    - memoryUpdate 和 action 都是必填对象；%s
-                    - memoryUpdate 必须保留 roleBeliefs、strategyState、communicationPlan、evidenceReferences 和 observedThroughSequence
+                    - action 是必填对象；%s
+                    - memoryUpdate 是可选认知草稿；若提供，应包含有效的 roleBeliefs、strategyState、communicationPlan 和 evidenceReferences
                     - publicSpeech 只有在当前阶段需要公开发言时才提供
                     - privateThought 可省略或写 null；如果提供，只写一句极短中文
                     - auditReason 可省略；数组中只保留最关键证据，不得编造不可见事件编号
@@ -286,8 +375,59 @@ public class ValidationRetryPolicy {
         return null;
     }
 
+    private String privateCampBeliefs(AgentTurnRequest request) {
+        Map<String, Double> beliefs = new java.util.LinkedHashMap<>();
+        Object ownCamp = request.getPrivateKnowledge().get("camp");
+        Double ownBelief = campBelief(ownCamp);
+        if (ownBelief != null) {
+            beliefs.put(request.getPlayerId(), ownBelief);
+        }
+        Object visiblePlayers = request.getPrivateKnowledge().get("visiblePlayers");
+        if (visiblePlayers instanceof Iterable<?> players) {
+            for (Object player : players) {
+                if (!(player instanceof Map<?, ?> values)) {
+                    continue;
+                }
+                Object playerId = values.get("playerId");
+                Double belief = campBelief(values.get("camp"));
+                if (playerId != null && belief != null) {
+                    beliefs.put(String.valueOf(playerId), belief);
+                }
+            }
+        }
+        return beliefs.toString();
+    }
+
+    private String beliefRange(AgentTurnRequest request, String playerId) {
+        double baseline = 0.5d;
+        Object roleBeliefs = request.getMemory().get("roleBeliefs");
+        if (roleBeliefs instanceof Map<?, ?> values && values.get(playerId) instanceof Number number) {
+            baseline = number.doubleValue();
+        }
+        double delta = roleBeliefs instanceof Map<?, ?> values && values.containsKey(playerId)
+                ? NO_EVIDENCE_MAX_DELTA
+                : INITIAL_PRIOR_MAX_DISTANCE;
+        return "[%.2f, %.2f]".formatted(
+                Math.max(0.0d, baseline - delta),
+                Math.min(1.0d, baseline + delta));
+    }
+
+    private Double campBelief(Object camp) {
+        if (camp == null) {
+            return null;
+        }
+        return switch (String.valueOf(camp).toUpperCase(Locale.ROOT)) {
+            case "GOOD" -> 0.0d;
+            case "EVIL" -> 1.0d;
+            default -> null;
+        };
+    }
+
     private boolean requiresCompressionRetry(String finishReason, String contentShape, String message) {
         if ("length".equalsIgnoreCase(finishReason)) {
+            return true;
+        }
+        if (message.contains("not valid JSON")) {
             return true;
         }
         if (contentShape == null || contentShape.isBlank()) {
@@ -298,6 +438,7 @@ public class ValidationRetryPolicy {
                  "plain_text",
                  "markdown_explanation",
                  "reasoning_only",
+                 "reasoning_json_object",
                  "missing_content" -> true;
             default -> message.contains("did not include an action object");
         };

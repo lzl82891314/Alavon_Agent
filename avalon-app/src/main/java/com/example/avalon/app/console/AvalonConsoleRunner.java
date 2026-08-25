@@ -124,6 +124,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                 }
             } catch (Exception exception) {
                 System.out.println("命令执行失败：" + commandFailureMessage(exception));
+                org.slf4j.LoggerFactory.getLogger(AvalonConsoleRunner.class)
+                        .error("Console command failed: {}", commandLine, exception);
             }
         }
     }
@@ -142,7 +144,16 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                 return generationException.getMessage() + "；具体原因：" + cause.getMessage();
             }
         }
-        return exception.getMessage();
+        Throwable root = exception;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        if (message == null || message.isBlank()) {
+            message = exception.getMessage();
+        }
+        return exception.getClass().getSimpleName()
+                + (message == null || message.isBlank() ? "" : "：" + message);
     }
 
     private boolean dispatch(String commandLine, BufferedReader reader) throws IOException {

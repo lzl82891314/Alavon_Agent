@@ -701,7 +701,7 @@ spring:
 | 游戏快照 | 保留最新及少量历史版本，可由事件重建 |
 | Agent Run、Tool Call、结构化 Artifact | 长期或评测周期保留，默认按玩家作用域导出 |
 | Belief、Strategy、Checkpoint | 保留每个座位的版本链，不能合并成全局摘要 |
-| 原始 Provider Prompt/Response | 默认关闭；开启时只存本地、脱敏并标记 retention policy |
+| 原始 Provider Prompt/Response/Reasoning | 默认关闭；SSE reasoning 默认只实时展示和保留截断预览，开启全文保留时只存本地、按玩家作用域隔离并标记 retention policy |
 | Token、延迟、错误和成本 | 可长期保留的结构化指标 |
 
 JSONL 导出必须明确视图：

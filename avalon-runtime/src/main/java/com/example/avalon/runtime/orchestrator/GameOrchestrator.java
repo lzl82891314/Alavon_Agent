@@ -578,9 +578,9 @@ public class GameOrchestrator {
         }
     }
 
-    private void pauseForLlmFailure(GameRuntimeState state,
-                                    PlayerRegistration player,
-                                    PlayerActionGenerationException exception) {
+    public void pauseForLlmFailure(GameRuntimeState state,
+                                   PlayerRegistration player,
+                                   PlayerActionGenerationException exception) {
         state.status(GameStatus.PAUSED);
         state.appendEvent("GAME_PAUSED", state.phase(), player.playerId(), Map.of(
                 "reason", "LLM_ACTION_FAILURE",

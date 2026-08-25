@@ -3,10 +3,10 @@ package com.example.avalon.agent.gateway;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.model.RawCompletionMetadata;
-import com.example.avalon.agent.model.MemoryUpdate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -18,9 +18,21 @@ import java.util.Map;
 public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
     private final OpenAiHttpTransport transport;
     private final ModelProfileApiKeyResolver apiKeys;
+    private final ModelStreamEventPublisher streamEvents;
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
-    public OpenAiResponsesGateway(OpenAiHttpTransport transport, ModelProfileApiKeyResolver apiKeys) { this.transport = transport; this.apiKeys = apiKeys; }
+    public OpenAiResponsesGateway(OpenAiHttpTransport transport, ModelProfileApiKeyResolver apiKeys) {
+        this(transport, apiKeys, ModelStreamEventPublisher.noop());
+    }
+
+    @Autowired
+    public OpenAiResponsesGateway(OpenAiHttpTransport transport,
+                                  ModelProfileApiKeyResolver apiKeys,
+                                  ModelStreamEventPublisher streamEvents) {
+        this.transport = transport;
+        this.apiKeys = apiKeys;
+        this.streamEvents = streamEvents;
+    }
 
     @Override
     public String protocolId() {
@@ -33,16 +45,58 @@ public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
         if (key == null || key.isBlank()) throw new IllegalStateException(ModelProfileSecretSupport.missingApiKeyMessage("openai", request.getModelId()));
         String baseUrl = OpenAiCompatibleSupport.stringOption(options, "baseUrl");
         Duration timeout = OpenAiCompatibleSupport.effectiveTimeout(request.getProvider(), options.get("timeoutMillis"));
-        JsonNode response = transport.postChatCompletion(OpenAiCompatibleSupport.responsesEndpointUri(baseUrl), Map.of("Authorization", "Bearer " + key), body(request), timeout);
-        return parse(request, response);
+        long startedAt = System.nanoTime();
+        String callId = streamEvents.started(request);
+        OpenAiResponsesSseAccumulator accumulator = new OpenAiResponsesSseAccumulator(
+                json, request, streamEvents, callId, startedAt);
+        SseHttpResponse streamResponse;
+        JsonNode response;
+        try {
+            streamResponse = transport.postEventStream(
+                    OpenAiCompatibleSupport.responsesEndpointUri(baseUrl),
+                    Map.of("Authorization", "Bearer " + key), body(request), timeout, accumulator::accept);
+        } catch (OpenAiCompatibleTransportException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.transportResponseException(
+                    request, exception, "openai", "gpt-5.2");
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, "openai", "gpt-5.2", "invalid_stream");
+        }
+        try {
+            response = accumulator.response();
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, "openai", "gpt-5.2", "stream_interrupted");
+        }
+        AgentTurnResult result;
+        try {
+            result = parse(request, response);
+            Map<String, Object> attributes = result.getModelMetadata().getAttributes();
+            attributes.put("streaming", true);
+            attributes.put("transportAttempts", streamResponse.transportAttempts());
+            attributes.put("reasoningChars", accumulator.reasoningChars());
+            putIfPresent(attributes, "reasoningDetailsPreview", OpenAiCompatibleSupport.contentPreview(accumulator.reasoning()));
+            putIfPresent(attributes, "firstReasoningDeltaMs", accumulator.firstReasoningDeltaMs());
+            putIfPresent(attributes, "firstContentDeltaMs", accumulator.firstContentDeltaMs());
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, "openai", "gpt-5.2", "invalid_response");
+        }
+        streamEvents.completed(callId, request, startedAt, streamResponse.transportAttempts());
+        return result;
     }
 
     private String body(AgentTurnRequest r) {
         ObjectNode root = json.createObjectNode();
         root.put("model", r.getModelName() == null || r.getModelName().isBlank() ? "gpt-5.2" : r.getModelName());
-        root.put("instructions", "You control an Avalon player. Return exactly one JSON object and do not reveal chain-of-thought.");
+        root.put("instructions", "你负责控制一名阿瓦隆玩家。公开发言和 privateThought 必须使用简体中文；只返回一个 JSON 对象，不要输出原始思维链。");
         root.put("input", r.getPromptText());
         root.put("store", false);
+        root.put("stream", true);
         ObjectNode text = root.putObject("text");
         ObjectNode format = text.putObject("format");
         format.put("type", "json_object");
@@ -61,16 +115,27 @@ public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
             AgentTurnResult result = new AgentTurnResult();
             result.setPublicSpeech(payload.path("publicSpeech").asText(null));
             result.setPrivateThought(payload.path("privateThought").asText(null));
-            result.setActionJson(payload.path("action").isTextual() ? payload.path("action").asText() : json.writeValueAsString(payload.path("action")));
-            if (payload.path("memoryUpdate").isObject()) {
-                result.setMemoryUpdate(json.treeToValue(payload.path("memoryUpdate"), MemoryUpdate.class));
+            JsonNode action = payload.path("action");
+            if (action.isMissingNode() || action.isNull()) {
+                throw new IllegalStateException("Responses API response did not include an action object");
             }
+            result.setActionJson(action.isTextual() ? action.asText() : json.writeValueAsString(action));
             RawCompletionMetadata metadata = new RawCompletionMetadata();
             metadata.setProvider("openai"); metadata.setModelName(response.path("model").asText(request.getModelName()));
             metadata.setInputTokens(response.path("usage").path("input_tokens").isMissingNode() ? null : response.path("usage").path("input_tokens").asLong());
             metadata.setOutputTokens(response.path("usage").path("output_tokens").isMissingNode() ? null : response.path("usage").path("output_tokens").asLong());
-            metadata.setAttributes(Map.of("gatewayType", "openai-responses", "responseId", response.path("id").asText()));
+            Map<String, Object> attributes = new LinkedHashMap<>();
+            attributes.put("gatewayType", "openai-responses");
+            putIfPresent(attributes, "responseId", response.path("id").asText(null));
+            metadata.setAttributes(attributes);
+            OpenAiCompatibleSupport.parseOptionalSections(json, payload, result, metadata);
             result.setModelMetadata(metadata); return result;
-        } catch (Exception e) { throw new IllegalStateException("Responses API returned invalid action JSON", e); }
+        } catch (Exception e) { throw new IllegalStateException("Responses API assistant content was not valid JSON", e); }
+    }
+
+    private void putIfPresent(Map<String, Object> values, String key, Object value) {
+        if (value != null && (!(value instanceof String text) || !text.isBlank())) {
+            values.put(key, value);
+        }
     }
 }

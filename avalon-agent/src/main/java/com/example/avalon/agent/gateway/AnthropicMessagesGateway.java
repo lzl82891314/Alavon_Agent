@@ -3,11 +3,11 @@ package com.example.avalon.agent.gateway;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.model.RawCompletionMetadata;
-import com.example.avalon.agent.model.MemoryUpdate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -21,11 +21,20 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
     private static final String DEFAULT_VERSION = "2023-06-01";
     private final OpenAiHttpTransport transport;
     private final ModelProfileApiKeyResolver apiKeys;
+    private final ModelStreamEventPublisher streamEvents;
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
     public AnthropicMessagesGateway(OpenAiHttpTransport transport, ModelProfileApiKeyResolver apiKeys) {
+        this(transport, apiKeys, ModelStreamEventPublisher.noop());
+    }
+
+    @Autowired
+    public AnthropicMessagesGateway(OpenAiHttpTransport transport,
+                                    ModelProfileApiKeyResolver apiKeys,
+                                    ModelStreamEventPublisher streamEvents) {
         this.transport = transport;
         this.apiKeys = apiKeys;
+        this.streamEvents = streamEvents;
     }
 
     @Override
@@ -42,13 +51,54 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
         }
         String baseUrl = OpenAiCompatibleSupport.stringOption(options, "baseUrl");
         Duration timeout = OpenAiCompatibleSupport.effectiveTimeout(request.getProvider(), options.get("timeoutMillis"));
-        JsonNode response = transport.postChatCompletion(
-                OpenAiCompatibleSupport.anthropicMessagesEndpointUri(baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE_URL : baseUrl),
-                headers(apiKey, options),
-                requestBody(request, requiredMaxOutputTokens(options, request.getModelId())),
-                timeout
-        );
-        return parseResponse(request, response);
+        long startedAt = System.nanoTime();
+        String callId = streamEvents.started(request);
+        AnthropicSseAccumulator accumulator = new AnthropicSseAccumulator(
+                json, request, streamEvents, callId, startedAt);
+        SseHttpResponse streamResponse;
+        JsonNode response;
+        try {
+            streamResponse = transport.postEventStream(
+                    OpenAiCompatibleSupport.anthropicMessagesEndpointUri(
+                            baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE_URL : baseUrl),
+                    headers(apiKey, options),
+                    requestBody(request, requiredMaxOutputTokens(options, request.getModelId())),
+                    timeout,
+                    accumulator::accept
+            );
+        } catch (OpenAiCompatibleTransportException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.transportResponseException(
+                    request, exception, "anthropic", request.getModelName());
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, "anthropic", request.getModelName(), "invalid_stream");
+        }
+        try {
+            response = accumulator.response();
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, "anthropic", request.getModelName(), "stream_interrupted");
+        }
+        AgentTurnResult result;
+        try {
+            result = parseResponse(request, response);
+            Map<String, Object> attributes = result.getModelMetadata().getAttributes();
+            attributes.put("streaming", true);
+            attributes.put("transportAttempts", streamResponse.transportAttempts());
+            attributes.put("reasoningChars", accumulator.reasoningChars());
+            putIfPresent(attributes, "reasoningDetailsPreview", OpenAiCompatibleSupport.contentPreview(accumulator.reasoning()));
+            putIfPresent(attributes, "firstReasoningDeltaMs", accumulator.firstReasoningDeltaMs());
+            putIfPresent(attributes, "firstContentDeltaMs", accumulator.firstContentDeltaMs());
+        } catch (RuntimeException exception) {
+            streamEvents.failed(callId, request, startedAt);
+            throw OpenAiCompatibleSupport.protocolResponseException(
+                    request, exception, "anthropic", request.getModelName(), "invalid_response");
+        }
+        streamEvents.completed(callId, request, startedAt, streamResponse.transportAttempts());
+        return result;
     }
 
     private Map<String, String> headers(String apiKey, Map<String, Object> options) {
@@ -62,7 +112,8 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
         ObjectNode root = json.createObjectNode();
         root.put("model", requiredModelName(request));
         root.put("max_tokens", maxOutputTokens);
-        root.put("system", "You control an Avalon player. Return exactly one JSON object. Do not reveal chain-of-thought.");
+        root.put("stream", true);
+        root.put("system", "你负责控制一名阿瓦隆玩家。公开发言和 privateThought 必须使用简体中文；只返回一个 JSON 对象，不要输出原始思维链。");
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "user").put("content", request.getPromptText());
         if (request.getTemperature() != null) {
@@ -90,13 +141,12 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
             result.setPublicSpeech(textOrNull(payload.path("publicSpeech")));
             result.setPrivateThought(textOrNull(payload.path("privateThought")));
             result.setActionJson(action.isTextual() ? action.asText() : json.writeValueAsString(action));
-            if (payload.path("memoryUpdate").isObject()) {
-                result.setMemoryUpdate(json.treeToValue(payload.path("memoryUpdate"), MemoryUpdate.class));
-            }
-            result.setModelMetadata(metadata(request, response));
+            RawCompletionMetadata metadata = metadata(request, response);
+            OpenAiCompatibleSupport.parseOptionalSections(json, payload, result, metadata);
+            result.setModelMetadata(metadata);
             return result;
         } catch (Exception exception) {
-            throw new IllegalStateException("Anthropic Messages response did not contain valid action JSON", exception);
+            throw new IllegalStateException("Anthropic Messages assistant content was not valid JSON", exception);
         }
     }
 
@@ -163,8 +213,8 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
         return node == null || node.isMissingNode() || node.isNull() ? null : node.asLong();
     }
 
-    private void putIfPresent(Map<String, Object> values, String key, String value) {
-        if (value != null) {
+    private void putIfPresent(Map<String, Object> values, String key, Object value) {
+        if (value != null && (!(value instanceof String text) || !text.isBlank())) {
             values.put(key, value);
         }
     }

@@ -9,6 +9,7 @@ import com.example.avalon.runtime.model.GameRuntimeState;
 import com.example.avalon.runtime.disclosure.GameEventVisibilityPolicy;
 
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,12 +37,14 @@ public final class PlayerObservationProjector {
         FactScope scope = "PUBLIC_SPEECH".equals(event.payload().get("actionType")) && utterance != null
                 ? FactScope.PUBLIC_CLAIM
                 : FactScope.WORLD_FACT;
+        Map<String, Object> facts = new LinkedHashMap<>(event.payload());
+        facts.values().removeIf(java.util.Objects::isNull);
         return new ObservedGameEvent(
                 event.seqNo(),
                 event.type(),
                 event.actorId(),
                 scope,
-                event.payload(),
+                facts,
                 utterance,
                 text(event.payload().get("speechAct")),
                 strings(event.payload().get("mentions")),

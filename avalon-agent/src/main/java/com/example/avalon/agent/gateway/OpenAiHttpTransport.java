@@ -1,11 +1,14 @@
 package com.example.avalon.agent.gateway;
 
-import com.fasterxml.jackson.databind.JsonNode;
-
 import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public interface OpenAiHttpTransport {
-    JsonNode postChatCompletion(URI uri, Map<String, String> headers, String requestBody, Duration timeout);
+    SseHttpResponse postEventStream(URI uri,
+                                    Map<String, String> headers,
+                                    String requestBody,
+                                    Duration timeout,
+                                    Consumer<SseFrame> frameConsumer);
 }

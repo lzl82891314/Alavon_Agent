@@ -22,17 +22,24 @@ final class PrivateKnowledgeExpressionValidator {
             "大概率", "更可能", "如果", "若", "像是"
     );
 
-    void validate(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+    void validatePublicAction(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
         if (result == null) {
             return;
         }
         List<CandidateKnowledge> candidateKnowledge = candidateKnowledge(context);
-        validateText("privateThought", result.getPrivateThought(), candidateKnowledge);
         String publicSpeech = action instanceof PublicSpeechAction speech
                 ? speech.speechText()
                 : result.getPublicSpeech();
         validateText("publicSpeech", publicSpeech, candidateKnowledge);
         validateExactKnowledgeDisclosure(context, publicSpeech);
+    }
+
+    void validatePrivateSections(PlayerTurnContext context, AgentTurnResult result) {
+        if (result == null) {
+            return;
+        }
+        List<CandidateKnowledge> candidateKnowledge = candidateKnowledge(context);
+        validateText("privateThought", result.getPrivateThought(), candidateKnowledge);
         AuditReason auditReason = result.getAuditReason();
         if (auditReason == null || auditReason.getReasonSummary() == null) {
             return;

@@ -1,5 +1,10 @@
 package com.example.avalon.agent.gateway;
 
+import com.example.avalon.agent.model.AgentTurnRequest;
+import com.example.avalon.agent.model.AgentTurnResult;
+import com.example.avalon.agent.model.AuditReason;
+import com.example.avalon.agent.model.MemoryUpdate;
+import com.example.avalon.agent.model.RawCompletionMetadata;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -7,6 +12,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -33,7 +39,9 @@ public final class OpenAiCompatibleSupport {
             "model",
             "messages",
             "temperature",
-            "max_completion_tokens"
+            "max_completion_tokens",
+            "stream",
+            "stream_options"
     );
     private static final Pattern CODE_BLOCK_PATTERN = Pattern.compile("(?s)```(?:json)?\\s*(.*?)```");
     private static final int PREVIEW_LIMIT = 160;
@@ -113,10 +121,27 @@ public final class OpenAiCompatibleSupport {
 
     public static OpenAiCompatibleMessageAnalysis analyzeAssistantMessage(JsonNode message) {
         String content = assistantContentOrNull(message.path("content"));
-        String reasoningPreview = reasoningPreview(message.path("reasoning_details"));
+        JsonNode reasoningNode = message.has("reasoning_details")
+                ? message.path("reasoning_details")
+                : message.path("reasoning_content");
+        String reasoningContent = reasoningContent(reasoningNode);
+        String reasoningPreview = contentPreview(reasoningContent);
         boolean contentPresent = content != null && !content.isBlank();
         boolean reasoningPresent = reasoningPreview != null && !reasoningPreview.isBlank();
         if (!contentPresent) {
+            String normalizedReasoning = reasoningContent == null ? null : reasoningContent.strip();
+            if (normalizedReasoning != null
+                    && normalizedReasoning.startsWith("{")
+                    && looksLikeJsonObject(normalizedReasoning)) {
+                return new OpenAiCompatibleMessageAnalysis(
+                        false,
+                        true,
+                        "reasoning_json_object",
+                        null,
+                        reasoningPreview,
+                        normalizedReasoning
+                );
+            }
             return new OpenAiCompatibleMessageAnalysis(
                     false,
                     reasoningPresent,
@@ -257,6 +282,103 @@ public final class OpenAiCompatibleSupport {
         return key != null && !LOCAL_OPTION_KEYS.contains(key) && !RESERVED_REQUEST_KEYS.contains(key);
     }
 
+    public static void parseOptionalSections(ObjectMapper objectMapper,
+                                             JsonNode payload,
+                                             AgentTurnResult result,
+                                             RawCompletionMetadata metadata) {
+        List<Map<String, Object>> warnings = new ArrayList<>();
+        result.setAuditReason(parseOptionalSection(
+                objectMapper, payload, "auditReason", AuditReason.class, warnings));
+        result.setMemoryUpdate(parseOptionalSection(
+                objectMapper, payload, "memoryUpdate", MemoryUpdate.class, warnings));
+        if (!warnings.isEmpty()) {
+            metadata.getAttributes().put("optionalSectionWarnings", List.copyOf(warnings));
+        }
+    }
+
+    public static OpenAiCompatibleResponseException transportResponseException(AgentTurnRequest request,
+                                                                                RuntimeException exception,
+                                                                                String defaultProvider,
+                                                                                String defaultModel) {
+        if (exception instanceof OpenAiCompatibleResponseException responseException) {
+            return responseException;
+        }
+        Map<String, Object> diagnostics = exception instanceof OpenAiCompatibleTransportException transportException
+                ? transportException.diagnostics()
+                : Map.of("failureDomain", "transport");
+        String provider = request == null || request.getProvider() == null || request.getProvider().isBlank()
+                ? defaultProvider
+                : providerId(request.getProvider());
+        String model = request == null || request.getModelName() == null || request.getModelName().isBlank()
+                ? defaultModel
+                : request.getModelName();
+        return new OpenAiCompatibleResponseException(
+                exception.getMessage() == null ? "Model SSE transport failed" : exception.getMessage(),
+                exception,
+                provider == null ? "unknown" : provider,
+                model == null ? "unknown" : model,
+                null,
+                null,
+                diagnostics
+        );
+    }
+
+    public static OpenAiCompatibleResponseException protocolResponseException(AgentTurnRequest request,
+                                                                               RuntimeException exception,
+                                                                               String defaultProvider,
+                                                                               String defaultModel,
+                                                                               String failureKind) {
+        if (exception instanceof OpenAiCompatibleResponseException responseException) {
+            return responseException;
+        }
+        String provider = request == null || request.getProvider() == null || request.getProvider().isBlank()
+                ? defaultProvider
+                : providerId(request.getProvider());
+        String model = request == null || request.getModelName() == null || request.getModelName().isBlank()
+                ? defaultModel
+                : request.getModelName();
+        return new OpenAiCompatibleResponseException(
+                exception.getMessage() == null ? "Model SSE response was invalid" : exception.getMessage(),
+                exception,
+                provider == null ? "unknown" : provider,
+                model == null ? "unknown" : model,
+                null,
+                null,
+                Map.of("failureDomain", "protocol", "failureKind", failureKind)
+        );
+    }
+
+    private static <T> T parseOptionalSection(ObjectMapper objectMapper,
+                                              JsonNode payload,
+                                              String fieldName,
+                                              Class<T> type,
+                                              List<Map<String, Object>> warnings) {
+        JsonNode section = payload.get(fieldName);
+        if (section == null || section.isNull() || section.isMissingNode()) {
+            return null;
+        }
+        if (!section.isObject()) {
+            warnings.add(optionalSectionWarning(fieldName, "expected_json_object", section));
+            return null;
+        }
+        try {
+            return objectMapper.treeToValue(section, type);
+        } catch (Exception exception) {
+            warnings.add(optionalSectionWarning(fieldName, "dto_conversion_failed", section));
+            return null;
+        }
+    }
+
+    private static Map<String, Object> optionalSectionWarning(String fieldName,
+                                                              String reason,
+                                                              JsonNode section) {
+        Map<String, Object> warning = new LinkedHashMap<>();
+        warning.put("field", fieldName);
+        warning.put("reason", reason);
+        warning.put("contentPreview", contentPreview(section == null ? null : section.toString()));
+        return Map.copyOf(warning);
+    }
+
     private static String assistantContentOrNull(JsonNode contentNode) {
         if (contentNode == null || contentNode.isNull() || contentNode.isMissingNode()) {
             return null;
@@ -365,7 +487,7 @@ public final class OpenAiCompatibleSupport {
         return null;
     }
 
-    private static String reasoningPreview(JsonNode reasoningNode) {
+    private static String reasoningContent(JsonNode reasoningNode) {
         if (reasoningNode == null || reasoningNode.isNull() || reasoningNode.isMissingNode()) {
             return null;
         }
@@ -373,9 +495,9 @@ public final class OpenAiCompatibleSupport {
         collectReasoningText(reasoningNode, chunks);
         String combined = String.join(" ", chunks).trim();
         if (!combined.isBlank()) {
-            return contentPreview(combined);
+            return combined;
         }
-        return contentPreview(reasoningNode.toString());
+        return reasoningNode.toString();
     }
 
     private static void collectReasoningText(JsonNode node, ArrayList<String> chunks) {

@@ -195,7 +195,7 @@ public class AvalonApplicationConfig {
     }
 
     @Bean(destroyMethod = "shutdown")
-    ExecutorService avalonAgentExecutor(@Value("${avalon.agent.parallelism:5}") int parallelism) {
+    ExecutorService avalonAgentExecutor(@Value("${avalon.agent.parallelism:2}") int parallelism) {
         return Executors.newFixedThreadPool(Math.max(1, parallelism));
     }
 

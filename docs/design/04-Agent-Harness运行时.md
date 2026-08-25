@@ -280,8 +280,9 @@ public interface ToolPolicy {
 ## 10. Model Loop
 
 ```text
-model request
--> response items
+model SSE request
+-> REASONING_DELTA / CONTENT_DELTA / USAGE / terminal events
+-> aggregate response items
    -> final structured output: exit loop
    -> tool calls: validate and execute
       -> append tool results
@@ -299,6 +300,15 @@ model request
 - 最大累计成本
 
 任何限制触发后都返回分类失败，不允许无限自治。
+
+### 10.1 流式执行约束
+
+- 所有真实 Provider Adapter 必须发送流式请求并增量消费 SSE，禁止生产路径回退到完整响应体的 `HttpClient.send(...ofString())`。
+- Transport 只解析 SSE `event`/`data` 帧；Chat Completions、Responses 和 Anthropic 的 JSON 事件语义由各自 Adapter 负责。
+- 首个 SSE 帧到达前的连接错误可以按 Transport Policy 重试；首帧到达后的中断必须报告 `STREAM_INTERRUPTED`，不能在 HTTP 层静默重放并产生重复分片。
+- Harness 只有在收到协议终止事件并成功聚合结构化结果后，才进入 Schema Validation。
+- `privateThought` 是模型明确返回的短策略摘要；Provider reasoning 是独立调试信号，两者不得互相回退或覆盖。
+- `TEAM_VOTE` 和 `MISSION_ACTION` 等私密原子动作应使用紧凑输出契约，默认只要求必需的 `action`，避免可选认知草稿扩大延迟和失败面。
 
 ## 11. 结构化动作输出
 
@@ -336,6 +346,26 @@ model request
 
 ## 12. 校验链
 
+校验链必须区分“最终动作契约”和“可选认知草稿契约”。二者来自同一次模型响应，
+但不能共享同一个成败边界：最终动作决定本回合能否提交，认知草稿只决定哪些私有状态可以写入。
+
+```text
+Provider response
+-> normalize and decode
+-> validate required action -----------------> retry / fail turn
+-> validate optional cognition draft --------> accept or discard draft with warning
+-> merge host-observed facts and cursor
+-> return ProposedAction + validated cognition
+```
+
+模型返回的 `memoryUpdate`、`decisionSummary`、`strategyState` 和
+`communicationPlan` 均属于不可信的可选草稿。字段缺失、类型错误、概率越界、证据引用无效或
+策略约束冲突时，Harness 必须丢弃对应草稿并记录 `optionalSectionWarnings`；只要最终动作合法且
+公开表达未越权，就不得为修复认知草稿而重复整次游戏动作。
+
+公开事件、公开主张、观察游标等可由宿主确定的事实不属于模型草稿。它们由宿主从
+`ObservationBatch` 写入，即使模型没有返回 `memoryUpdate` 或其草稿被丢弃，也必须正常推进。
+
 ### 12.1 Protocol Validation
 
 - Provider 响应是否完整。
@@ -360,6 +390,18 @@ Harness 可以调用只读的 `ActionPrevalidator` 检查：
 
 最终权威校验仍由 `GameRuleEngine` 在提交命令时执行，以防并发变化。
 
+### 12.4 Optional Cognition Validation
+
+可选认知草稿单独验证：
+
+- Evidence Ref 是否真实、可见且与目标玩家相关。
+- Belief 概率、变化幅度和私有确定知识是否一致。
+- Strategy、Communication Plan 和角色策略约束是否匹配。
+- Memory Mutation 是否只写入当前 Agent 的私有作用域。
+
+该阶段失败默认不触发模型重试，也不改变最终动作。告警进入私有 Run Trace；正式认知状态只合并
+通过校验的模型草稿和宿主确定性事实。
+
 ## 13. 修复与重试
 
 重试按失败类型决定：
@@ -367,9 +409,11 @@ Harness 可以调用只读的 `ActionPrevalidator` 检查：
 | 失败 | 默认行为 |
 | --- | --- |
 | HTTP 瞬时错误 | 指数退避重试，受 Deadline 限制 |
+| 首帧后的 SSE 中断或读取超时 | Transport 不原地重放；Harness 创建一次新的 Model Request Attempt |
 | 限流 | 读取 Retry-After，必要时切换备用模型 |
 | JSON/Schema 错误 | 发送最小修复反馈，再调用一次 |
 | 领域非法动作 | 提供合法动作约束和错误码，再调用一次 |
+| 可选认知草稿非法 | 丢弃草稿并记录告警，不重试最终动作 |
 | 权限或秘密泄漏 | 不重试，立即安全失败并暂停 |
 | 配置错误 | 不重试，启动或开局时失败 |
 | 预算耗尽 | 不重试，执行 Failure Policy |

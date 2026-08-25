@@ -105,6 +105,16 @@ class BeliefUpdatePolicyTest {
         update.setRoleBeliefs(beliefs);
         update.setEvidenceReferences(evidence);
         update.setBeliefEvidenceReferences(bindings);
+        update.setStrategyState(Map.of(
+                "mode", "OBSERVE",
+                "objective", "revise beliefs from visible evidence",
+                "deceptionIntent", "NONE",
+                "exposureRisk", 0.2d
+        ));
+        update.setCommunicationPlan(Map.of(
+                "speechAct", "STATE_OPINION",
+                "publicMessage", "我根据当前可见证据调整判断。"
+        ));
         result.setMemoryUpdate(update);
         return result;
     }

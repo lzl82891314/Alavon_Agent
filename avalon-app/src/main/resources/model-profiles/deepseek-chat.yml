@@ -9,6 +9,7 @@ enabled: true
 providerOptions:
   baseUrl: https://gcapi.cn/v1
   apiKeyEnv: DEEPSEEK_API_KEY
+  timeoutMillis: 60000
   instructionRole: system
   response_format:
     type: json_object

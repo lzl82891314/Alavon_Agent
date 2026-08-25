@@ -1,6 +1,5 @@
 package com.example.avalon.agent.gateway;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -12,6 +11,8 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,14 +33,20 @@ class JdkOpenAiHttpTransportTest {
     }
 
     @Test
-    void postsJsonAndParsesSuccessfulResponse() {
-        server.createContext("/v1/chat/completions", exchange -> respond(exchange, 200,
-                "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"));
+    void consumesSuccessfulEventStream() {
+        server.createContext("/v1/chat/completions", exchange -> respondSse(exchange,
+                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        List<SseFrame> frames = new ArrayList<>();
 
-        JsonNode response = transport().postChatCompletion(endpoint(), Map.of("Authorization", "Bearer test"),
-                "{\"model\":\"test\"}", Duration.ofSeconds(2));
+        SseHttpResponse response = transport().postEventStream(
+                endpoint(), Map.of("Authorization", "Bearer test"),
+                "{\"model\":\"test\"}", Duration.ofSeconds(2), frames::add);
 
-        assertEquals("ok", response.at("/choices/0/message/content").asText());
+        assertEquals(200, response.statusCode());
+        assertEquals(2, frames.size());
+        assertEquals("{\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}", frames.get(0).data());
+        assertEquals("[DONE]", frames.get(1).data());
     }
 
     @Test
@@ -48,7 +55,8 @@ class JdkOpenAiHttpTransportTest {
 
         OpenAiCompatibleTransportException exception = assertThrows(
                 OpenAiCompatibleTransportException.class,
-                () -> transport().postChatCompletion(endpoint(), Map.of(), "{}", Duration.ofSeconds(2))
+                () -> transport().postEventStream(
+                        endpoint(), Map.of(), "{}", Duration.ofSeconds(2), frame -> { })
         );
 
         assertEquals("transport", exception.diagnostics().get("failureDomain"));
@@ -57,15 +65,17 @@ class JdkOpenAiHttpTransportTest {
     }
 
     @Test
-    void exposesNonJsonSuccessBody() {
+    void rejectsNonSseSuccessBody() {
         server.createContext("/v1/chat/completions", exchange -> respond(exchange, 200, "upstream html"));
 
         OpenAiCompatibleTransportException exception = assertThrows(
                 OpenAiCompatibleTransportException.class,
-                () -> transport().postChatCompletion(endpoint(), Map.of(), "{}", Duration.ofSeconds(2))
+                () -> transport().postEventStream(
+                        endpoint(), Map.of(), "{}", Duration.ofSeconds(2), frame -> { })
         );
 
         assertEquals("http_response", exception.diagnostics().get("failureDomain"));
+        assertEquals("unexpected_content_type", exception.diagnostics().get("failureKind"));
         assertEquals(200, exception.diagnostics().get("statusCode"));
         assertEquals("upstream html", exception.diagnostics().get("bodyPreview"));
     }
@@ -84,5 +94,10 @@ class JdkOpenAiHttpTransportTest {
         try (exchange) {
             exchange.getResponseBody().write(bytes);
         }
+    }
+
+    private void respondSse(HttpExchange exchange, String body) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        respond(exchange, 200, body);
     }
 }

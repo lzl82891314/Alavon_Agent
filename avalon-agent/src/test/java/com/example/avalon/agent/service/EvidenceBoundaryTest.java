@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class EvidenceBoundaryTest {
     @Test
@@ -31,8 +32,12 @@ class EvidenceBoundaryTest {
         AgentTurnRequest request = new AgentTurnRequest();
         request.setAllowedActions(List.of("PUBLIC_SPEECH"));
 
-        assertThrows(AgentTurnExecutionException.class, () -> new ValidationRetryPolicy().execute(
-                context(), request, gateway, new ResponseParser()));
+        AgentTurnExecutionException exception = assertThrows(
+                AgentTurnExecutionException.class,
+                () -> new ValidationRetryPolicy().execute(context(), request, gateway, new ResponseParser())
+        );
+
+        assertEquals("Evidence reference is not visible to this agent: 999", exception.getCause().getMessage());
     }
 
     private AgentTurnResult invalidResult() {
@@ -43,6 +48,15 @@ class EvidenceBoundaryTest {
         update.setEvidenceReferences(List.of(999L));
         update.setBeliefEvidenceReferences(Map.of("P2", List.of(999L)));
         update.setRoleBeliefs(Map.of("P2", 0.7d));
+        update.setStrategyState(Map.of(
+                "mode", "OBSERVE",
+                "objective", "use only visible evidence",
+                "deceptionIntent", "NONE"
+        ));
+        update.setCommunicationPlan(Map.of(
+                "speechAct", "STATE_OPINION",
+                "publicMessage", "我只依据公开证据判断。"
+        ));
         result.setMemoryUpdate(update);
         return result;
     }

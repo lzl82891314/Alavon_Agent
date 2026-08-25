@@ -32,6 +32,11 @@ public class LlmPlayerController implements PlayerController {
             "reasoningDetailsPreview",
             "contentPresent",
             "reasoningDetailsPresent",
+            "streaming",
+            "transportAttempts",
+            "firstReasoningDeltaMs",
+            "firstContentDeltaMs",
+            "reasoningChars",
             "finishReason",
             "gatewayType"
     );
@@ -95,10 +100,9 @@ public class LlmPlayerController implements PlayerController {
 
     private com.example.avalon.core.player.memory.MemoryUpdate toCoreMemoryUpdate(AgentTurnResult turnResult,
                                                                                  PlayerTurnContext context) {
-        if (turnResult.getMemoryUpdate() == null) {
-            return null;
-        }
-        com.example.avalon.agent.model.MemoryUpdate proposed = turnResult.getMemoryUpdate();
+        com.example.avalon.agent.model.MemoryUpdate proposed = turnResult.getMemoryUpdate() == null
+                ? new com.example.avalon.agent.model.MemoryUpdate()
+                : turnResult.getMemoryUpdate();
         List<Map<String, Object>> worldFacts = new java.util.ArrayList<>();
         List<Map<String, Object>> publicClaims = new java.util.ArrayList<>();
         context.observations().events().forEach(event -> {

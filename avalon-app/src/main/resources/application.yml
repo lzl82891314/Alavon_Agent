@@ -17,6 +17,8 @@ spring:
     enabled: true
 
 avalon:
+  agent:
+    parallelism: 2
   storage:
     database-path: ${user.home}/.avalon-agent/arenas/default--37a8eec1/avalon-v1.sqlite
   app-name: Avalon AI
@@ -24,3 +26,4 @@ avalon:
     log-directory: ${user.home}/.avalon-agent/logs
   console:
     enabled: false
+    model-stream-enabled: false
