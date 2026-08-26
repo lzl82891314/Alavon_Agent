@@ -20,7 +20,8 @@ import java.util.regex.Pattern;
 @Component
 public class ValidationRetryPolicy {
     private static final Logger LOGGER = LoggerFactory.getLogger(ValidationRetryPolicy.class);
-    private static final int DEFAULT_MAX_ATTEMPTS = 2;
+    private static final int DEFAULT_MAX_RETRIES = 3;
+    private static final int DEFAULT_MAX_ATTEMPTS = DEFAULT_MAX_RETRIES + 1;
     private static final String OPTIONAL_SECTION_WARNINGS = "optionalSectionWarnings";
     private static final Pattern CHINESE_CHARACTER = Pattern.compile("[\\p{IsHan}]");
     private static final Pattern ENGLISH_WORD = Pattern.compile("[A-Za-z]{2,}");
