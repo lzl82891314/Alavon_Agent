@@ -29,8 +29,42 @@ public record PlayerMemoryState(
         String agentInstanceId,
         String strategyMode,
         String lastSummary,
+        Map<String, Map<String, Object>> cognitionSectionStatuses,
+        boolean cognitionDegraded,
+        List<String> acceptedCognitionSections,
+        Map<String, Object> privateActionAssessment,
         Instant updatedAt
 ) {
+
+    public PlayerMemoryState(
+            String gameId,
+            String playerId,
+            Long version,
+            String roleId,
+            Camp camp,
+            Map<String, Double> suspicionScores,
+            Map<String, Double> trustScores,
+            List<String> observations,
+            List<String> commitments,
+            List<String> inferredFacts,
+            List<Map<String, Object>> worldFacts,
+            List<Map<String, Object>> publicClaims,
+            Map<String, Double> roleBeliefs,
+            Map<String, Object> strategyState,
+            Map<String, Object> communicationPlan,
+            Map<String, List<Long>> beliefEvidenceReferences,
+            Long lastObservedSequence,
+            String agentInstanceId,
+            String strategyMode,
+            String lastSummary,
+            Instant updatedAt
+    ) {
+        this(gameId, playerId, version, roleId, camp, suspicionScores, trustScores, observations,
+                commitments, inferredFacts, worldFacts, publicClaims, roleBeliefs, strategyState,
+                communicationPlan, beliefEvidenceReferences, lastObservedSequence, agentInstanceId,
+                strategyMode, lastSummary, Map.of(), false, List.of(), Map.of(), updatedAt);
+    }
+
     public PlayerMemoryState {
         suspicionScores = suspicionScores == null ? Map.of() : Map.copyOf(suspicionScores);
         trustScores = trustScores == null ? Map.of() : Map.copyOf(trustScores);
@@ -43,6 +77,9 @@ public record PlayerMemoryState(
         strategyState = strategyState == null ? Map.of() : Map.copyOf(strategyState);
         communicationPlan = communicationPlan == null ? Map.of() : Map.copyOf(communicationPlan);
         beliefEvidenceReferences = copyEvidenceBindings(beliefEvidenceReferences);
+        cognitionSectionStatuses = copySectionStatuses(cognitionSectionStatuses);
+        acceptedCognitionSections = acceptedCognitionSections == null ? List.of() : List.copyOf(acceptedCognitionSections);
+        privateActionAssessment = privateActionAssessment == null ? Map.of() : Map.copyOf(privateActionAssessment);
     }
 
     public static PlayerMemoryState empty(String gameId, String playerId, String roleId, Camp camp, Instant now) {
@@ -67,6 +104,10 @@ public record PlayerMemoryState(
                 playerId + ":primary",
                 "NEUTRAL",
                 null,
+                Map.of(),
+                false,
+                List.of(),
+                Map.of(),
                 now
         );
     }
@@ -84,6 +125,7 @@ public record PlayerMemoryState(
 
         List<Map<String, Object>> nextWorldFacts = appendBounded(worldFacts, update.worldFactsToAdd(), 120);
         List<Map<String, Object>> nextPublicClaims = appendBounded(publicClaims, update.publicClaimsToAdd(), 120);
+        Map<String, Object> acceptedStrategyState = new LinkedHashMap<>(update.strategyState());
 
         return new PlayerMemoryState(
                 gameId,
@@ -99,15 +141,28 @@ public record PlayerMemoryState(
                 nextWorldFacts,
                 nextPublicClaims,
                 update.roleBeliefs().isEmpty() ? roleBeliefs : update.roleBeliefs(),
-                update.strategyState().isEmpty() ? strategyState : update.strategyState(),
+                acceptedStrategyState.isEmpty() ? strategyState : acceptedStrategyState,
                 update.communicationPlan().isEmpty() ? communicationPlan : update.communicationPlan(),
                 mergeEvidenceBindings(beliefEvidenceReferences, update.beliefEvidenceReferences()),
                 update.observedThroughSequence() == null ? lastObservedSequence : update.observedThroughSequence(),
                 agentInstanceId,
                 update.strategyMode() == null ? strategyMode : update.strategyMode(),
                 update.lastSummary() == null ? lastSummary : truncate(update.lastSummary(), 2000),
+                update.cognitionSectionStatuses().isEmpty() ? cognitionSectionStatuses : update.cognitionSectionStatuses(),
+                update.cognitionDegraded(),
+                update.acceptedCognitionSections().isEmpty() ? acceptedCognitionSections : update.acceptedCognitionSections(),
+                update.privateActionAssessment().isEmpty() ? privateActionAssessment : update.privateActionAssessment(),
                 now
         );
+    }
+
+    private static Map<String, Map<String, Object>> copySectionStatuses(
+            Map<String, Map<String, Object>> statuses) {
+        if (statuses == null || statuses.isEmpty()) return Map.of();
+        Map<String, Map<String, Object>> copy = new LinkedHashMap<>();
+        statuses.forEach((section, status) ->
+                copy.put(section, status == null ? Map.of() : Map.copyOf(status)));
+        return Map.copyOf(copy);
     }
 
     private static Map<String, List<Long>> copyEvidenceBindings(Map<String, List<Long>> bindings) {

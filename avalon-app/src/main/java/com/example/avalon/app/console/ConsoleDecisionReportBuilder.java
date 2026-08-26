@@ -186,6 +186,8 @@ public class ConsoleDecisionReportBuilder {
             row.publicSpeech = publicSpeech(auditEntry);
         }
         row.privateThought = privateThought(auditEntry);
+        row.acceptedCognition = acceptedCognition(auditEntry, false);
+        row.deterministicContext = deterministicContext(auditEntry);
         row.note = buildNote(auditEntry, false);
         row.failed = false;
         row.actionDetail = detailFromAudit(auditEntry, row.actionType);
@@ -211,6 +213,8 @@ public class ConsoleDecisionReportBuilder {
         row.actionDetail = detailFromAudit(auditEntry, row.actionType);
         row.publicSpeech = publicSpeech(auditEntry);
         row.privateThought = privateThought(auditEntry);
+        row.acceptedCognition = acceptedCognition(auditEntry, true);
+        row.deterministicContext = deterministicContext(auditEntry);
         row.note = buildNote(auditEntry, true);
         row.failed = true;
         section.rows.add(row);
@@ -305,15 +309,146 @@ public class ConsoleDecisionReportBuilder {
         if (reasoningPreview != null) {
             return reasoningPreview;
         }
-        Map<String, Object> auditReason = structuredMap(auditEntry == null ? null : auditEntry.getAuditReasonJson());
-        Object reasonSummary = auditReason.get("reasonSummary");
-        if (reasonSummary instanceof Collection<?> collection && !collection.isEmpty()) {
-            return collection.stream()
-                    .map(String::valueOf)
-                    .filter(text -> !text.isBlank())
-                    .collect(Collectors.joining("；"));
+        return null;
+    }
+
+    private String acceptedCognition(GameAuditEntryResponse auditEntry, boolean failed) {
+        if (auditEntry == null) {
+            return null;
         }
-        return normalizeText(stringValue(auditReason.get("goal")));
+        List<String> parts = new ArrayList<>();
+        Map<String, Object> inputContext = structuredMap(auditEntry.getInputContextJson());
+        Map<String, Object> memory = mapValue(inputContext.get("memory"));
+        appendProjection(parts, "行动前正式模式", firstValue(memory, "strategyMode", "currentMode"));
+        appendProjection(parts, "行动前正式策略", firstValue(memory, "strategyState", "minimumStrategicState"));
+        appendProjection(parts, "行动前正式假设", firstValue(memory,
+                "leadingHypotheses", "roleHypotheses", "hypotheses"));
+        appendProjection(parts, "行动前正式受众", firstValue(memory,
+                "audienceBeliefUpdate", "audienceBeliefs", "audiencePlan", "communicationPlan"));
+        appendProjection(parts, "行动前正式刺杀候选", firstValue(memory,
+                "assassinationTracking", "assassinationCandidates"));
+
+        Map<String, Object> validation = structuredMap(auditEntry.getValidationResultJson());
+        appendProjection(parts, "认知区段状态", validation.get("cognitionSectionStatuses"));
+        appendProjection(parts, "已接受区段", validation.get("acceptedCognitionSections"));
+        Map<String, Object> rawModelResponse = structuredMap(auditEntry.getRawModelResponseJson());
+        Object acceptedUpdate = rawModelResponse.get("memoryUpdate");
+        if (!failed && !Boolean.FALSE.equals(validation.get("valid")) && acceptedUpdate instanceof Map<?, ?> update) {
+            Object acceptedSections = validation.get("acceptedCognitionSections");
+            appendProjection(parts, "本次已接受认知", acceptedMemorySections(update, acceptedSections));
+        }
+        appendProjection(parts, "正式审计理由", structuredMap(auditEntry.getAuditReasonJson()));
+        return parts.isEmpty() ? null : String.join("；", parts);
+    }
+
+    private Map<String, Object> acceptedMemorySections(Map<?, ?> update, Object acceptedSections) {
+        if (!(acceptedSections instanceof Collection<?> sections)) {
+            return new LinkedHashMap<>(stringObjectMap(update));
+        }
+        Map<String, Object> accepted = new LinkedHashMap<>();
+        for (Object section : sections) {
+            String name = String.valueOf(section);
+            switch (name) {
+                case "memoryNotes" -> copyKeys(update, accepted, "suspicionDelta", "trustDelta",
+                        "observationsToAdd", "commitmentsToAdd", "inferredFactsToAdd");
+                case "evidenceAssessments" -> copyKeys(update, accepted, "evidenceReferences",
+                        "beliefEvidenceReferences");
+                case "beliefUpdate" -> copyKeys(update, accepted, "roleBeliefs", "beliefEvidenceReferences");
+                case "strategyState" -> copyKeys(update, accepted, "strategyState", "strategyMode", "lastSummary");
+                case "communicationPlan" -> copyKeys(update, accepted, "communicationPlan");
+                case "privateActionAssessment" -> copyKeys(update, accepted, "privateActionAssessment");
+                default -> { }
+            }
+        }
+        return accepted;
+    }
+
+    private void copyKeys(Map<?, ?> source, Map<String, Object> target, String... keys) {
+        for (String key : keys) {
+            if (source.containsKey(key)) target.put(key, source.get(key));
+        }
+    }
+
+    private Map<String, Object> stringObjectMap(Map<?, ?> source) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, value) -> result.put(String.valueOf(key), value));
+        return result;
+    }
+
+    private String deterministicContext(GameAuditEntryResponse auditEntry) {
+        if (auditEntry == null) {
+            return null;
+        }
+        Map<String, Object> inputContext = structuredMap(auditEntry.getInputContextJson());
+        Map<String, Object> strategyContext = mapValue(inputContext.get("strategyContext"));
+        List<String> parts = new ArrayList<>();
+        appendProjection(parts, "投票证据", firstValue(strategyContext, "voteEvidence", "voteHistory"));
+        appendProjection(parts, "队伍候选", firstValue(strategyContext,
+                "teamCandidateAssessments", "teamCandidates", "candidateActions"));
+        appendProjection(parts, "任务证据", firstValue(strategyContext, "missionEvidence", "missionConstraints"));
+        appendProjection(parts, "矛盾", firstValue(strategyContext,
+                "detectedContradictions", "contradictions"));
+        appendProjection(parts, "宿主假设", firstValue(strategyContext,
+                "roleHypotheses", "hypotheses", "leadingHypotheses"));
+        appendProjection(parts, "策略模式", firstValue(strategyContext,
+                "strategyMode", "currentMode", "mode"));
+        appendProjection(parts, "受众计划", firstValue(strategyContext,
+                "audiencePlan", "audienceContext", "targetAudience"));
+        appendProjection(parts, "刺杀候选", firstValue(strategyContext,
+                "assassinationCandidates", "assassinationTracking"));
+        return parts.isEmpty() ? null : String.join("；", parts);
+    }
+
+    private boolean hasDiscardedMemoryWarning(Map<String, Object> validation) {
+        Object warnings = validation.get("optionalSectionWarnings");
+        if (!(warnings instanceof Collection<?> collection)) {
+            return false;
+        }
+        return collection.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(warning -> stringValue(warning.get("field")))
+                .anyMatch(field -> field != null && field.startsWith("memoryUpdate"));
+    }
+
+    private Object firstValue(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (!isEmptyValue(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private boolean isEmptyValue(Object value) {
+        return value == null
+                || value instanceof String text && text.isBlank()
+                || value instanceof Collection<?> collection && collection.isEmpty()
+                || value instanceof Map<?, ?> map && map.isEmpty();
+    }
+
+    private void appendProjection(List<String> parts, String label, Object value) {
+        if (!isEmptyValue(value)) {
+            parts.add(label + ": " + normalizeText(formatValue(value)));
+        }
+    }
+
+    private String formatValue(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ignored) {
+            return String.valueOf(value);
+        }
+    }
+
+    private Map<String, Object> mapValue(Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return Map.of();
+        }
+        Map<String, Object> copied = new LinkedHashMap<>();
+        map.forEach((key, nestedValue) -> copied.put(String.valueOf(key), nestedValue));
+        return copied;
     }
 
     private String buildNote(GameAuditEntryResponse auditEntry, boolean includeErrorMessage) {
@@ -326,6 +461,10 @@ public class ConsoleDecisionReportBuilder {
             parts.add("模型私有知识: " + inputKnowledgeSummary);
         }
         Map<String, Object> validation = structuredMap(auditEntry.getValidationResultJson());
+        Object cognitionDegraded = validation.get("cognitionDegraded");
+        if (cognitionDegraded != null) {
+            parts.add("认知降级: " + cognitionDegraded);
+        }
         Object warnings = validation.get("optionalSectionWarnings");
         if (warnings instanceof Collection<?> collection) {
             for (Object item : collection) {
@@ -514,6 +653,8 @@ public class ConsoleDecisionReportBuilder {
         private String actionDetail;
         private String publicSpeech;
         private String privateThought;
+        private String acceptedCognition;
+        private String deterministicContext;
         private String note;
         private boolean failed;
 
@@ -527,6 +668,8 @@ public class ConsoleDecisionReportBuilder {
                     actionDetail,
                     publicSpeech,
                     privateThought,
+                    acceptedCognition,
+                    deterministicContext,
                     note,
                     failed
             );

@@ -361,7 +361,7 @@ public class ConsoleTranscriptPrinter {
                 .append(System.lineSeparator())
                 .append("  Markdown=").append(markdownPath.toAbsolutePath().normalize())
                 .append(System.lineSeparator())
-                .append("  说明=privateThought 是模型原始文本，不等同于规则允许的确定知识");
+                .append("  说明=模型原始文本、已接受正式认知与宿主确定性上下文彼此独立");
 
         if (!report.players().isEmpty()) {
             builder.append(System.lineSeparator())
@@ -398,7 +398,7 @@ public class ConsoleTranscriptPrinter {
             }
             builder.append(System.lineSeparator())
                     .append(renderMarkdownTable(
-                            List.of("序号", "阶段", "玩家", "角色", "动作", "公开发言", "私有思考", "备注"),
+                            List.of("序号", "阶段", "玩家", "角色", "动作", "公开发言", "模型原始文本", "已接受正式认知", "宿主确定性上下文", "备注"),
                             section.rows().stream()
                                     .map(row -> List.of(
                                             Objects.toString(row.eventSeqNo(), "-"),
@@ -408,6 +408,8 @@ public class ConsoleTranscriptPrinter {
                                             limitConsoleCell(reportActionLabel(row, session, playersById), 20),
                                             limitConsoleCell(orDash(row.publicSpeech()), 24),
                                             limitConsoleCell(orDash(row.privateThought()), 24),
+                                            limitConsoleCell(orDash(row.acceptedCognition()), 32),
+                                            limitConsoleCell(orDash(row.deterministicContext()), 32),
                                             limitConsoleCell(orDash(row.note()), 24)
                                     ))
                                     .toList()
@@ -426,7 +428,7 @@ public class ConsoleTranscriptPrinter {
                 .append("- 阶段：").append(phaseLabel(report.phase())).append(System.lineSeparator())
                 .append("- 当前轮次：").append(report.roundNo() == null ? "-" : "第" + report.roundNo() + "轮").append(System.lineSeparator())
                 .append("- 胜利阵营：").append(campLabel(report.winnerCamp())).append(System.lineSeparator())
-                .append("- 说明：privateThought 是模型原始文本，不等同于规则允许的确定知识").append(System.lineSeparator());
+                .append("- 说明：模型原始文本、已接受正式认知与宿主确定性上下文彼此独立").append(System.lineSeparator());
 
         if (!report.players().isEmpty()) {
             builder.append(System.lineSeparator())
@@ -465,7 +467,7 @@ public class ConsoleTranscriptPrinter {
                 continue;
             }
             builder.append(renderMarkdownTable(
-                            List.of("序号", "阶段", "玩家", "角色", "动作", "公开发言", "私有思考", "备注"),
+                            List.of("序号", "阶段", "玩家", "角色", "动作", "公开发言", "模型原始文本", "已接受正式认知", "宿主确定性上下文", "备注"),
                             section.rows().stream()
                                     .map(row -> List.of(
                                             Objects.toString(row.eventSeqNo(), "-"),
@@ -475,6 +477,8 @@ public class ConsoleTranscriptPrinter {
                                             reportActionLabel(row, session, playersById),
                                             orDash(row.publicSpeech()),
                                             orDash(row.privateThought()),
+                                            orDash(row.acceptedCognition()),
+                                            orDash(row.deterministicContext()),
                                             orDash(row.note())
                                     ))
                                     .toList()

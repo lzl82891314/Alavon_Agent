@@ -5,6 +5,7 @@ import com.example.avalon.agent.gateway.OpenAiCompatibleResponseException;
 import com.example.avalon.agent.gateway.OpenAiCompatibleTransportException;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
+import com.example.avalon.agent.model.MemoryUpdate;
 import com.example.avalon.agent.strategy.RoleStrategyPolicy;
 import com.example.avalon.core.game.model.PlayerAction;
 import com.example.avalon.core.game.model.PlayerTurnContext;
@@ -12,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -99,29 +101,123 @@ public class ValidationRetryPolicy {
             discardOptionalSection(context, result, "privateThought/auditReason", exception);
         }
         if (result.getMemoryUpdate() == null) {
+            recordMissingMemorySections(result);
+            recordPrivateActionAssessment(context, result, action);
+            return;
+        }
+        validateMemoryNotes(context, result);
+        validateEvidenceAssessments(context, result);
+        validateBeliefUpdate(context, result);
+        validateStrategyState(context, result);
+        validateCommunicationPlan(context, result, action);
+        recordPrivateActionAssessment(context, result, action);
+    }
+
+    private void validateEvidenceAssessments(PlayerTurnContext context, AgentTurnResult result) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        if (update.getEvidenceReferences().isEmpty()) {
+            recordSectionStatus(result, "evidenceAssessments", "NOT_PROVIDED",
+                    "memoryUpdate.evidenceReferences", null, null);
             return;
         }
         try {
-            validateCognitionDraft(context, result, action);
+            validateVisibleEvidence(context, update.getEvidenceReferences());
+            recordSectionAccepted(result, "evidenceAssessments", "memoryUpdate.evidenceReferences");
         } catch (RuntimeException exception) {
-            result.setMemoryUpdate(null);
-            discardOptionalSection(context, result, "memoryUpdate", exception);
+            update.setEvidenceReferences(List.of());
+            discardCognitionSection(context, result, "evidenceAssessments",
+                    "memoryUpdate.evidenceReferences", exception);
         }
     }
 
-    private void validateCognitionDraft(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
-        validateStrategyContract(context, result, action);
+    private void validateBeliefUpdate(PlayerTurnContext context, AgentTurnResult result) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        if (update.getRoleBeliefs().isEmpty() && update.getBeliefEvidenceReferences().isEmpty()) {
+            recordSectionStatus(result, "beliefUpdate", "NOT_PROVIDED",
+                    "memoryUpdate.roleBeliefs", null, null);
+            return;
+        }
+        try {
+            validateBeliefs(context, result);
+            recordSectionAccepted(result, "beliefUpdate", "memoryUpdate.roleBeliefs");
+        } catch (RuntimeException exception) {
+            update.setRoleBeliefs(Map.of());
+            update.setBeliefEvidenceReferences(Map.of());
+            discardCognitionSection(context, result, "beliefUpdate",
+                    "memoryUpdate.roleBeliefs", exception);
+        }
+    }
+
+    private void validateStrategyState(PlayerTurnContext context, AgentTurnResult result) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        boolean provided = !update.getStrategyState().isEmpty()
+                || update.getStrategyMode() != null || update.getLastSummary() != null;
+        if (!provided) {
+            recordSectionStatus(result, "strategyState", "NOT_PROVIDED",
+                    "memoryUpdate.strategyState", null, null);
+            return;
+        }
+        try {
+            validateStrategyContract(context, update);
+            recordSectionAccepted(result, "strategyState", "memoryUpdate.strategyState");
+        } catch (RuntimeException exception) {
+            update.setStrategyState(Map.of());
+            update.setStrategyMode(null);
+            update.setLastSummary(null);
+            discardCognitionSection(context, result, "strategyState",
+                    "memoryUpdate.strategyState", exception);
+        }
+    }
+
+    private void validateCommunicationPlan(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        if (update.getCommunicationPlan().isEmpty()) {
+            recordSectionStatus(result, "communicationPlan", "NOT_PROVIDED",
+                    "memoryUpdate.communicationPlan", null, null);
+            return;
+        }
+        try {
+            validateCommunicationContract(update, action);
+            recordSectionAccepted(result, "communicationPlan", "memoryUpdate.communicationPlan");
+        } catch (RuntimeException exception) {
+            update.setCommunicationPlan(Map.of());
+            discardCognitionSection(context, result, "communicationPlan",
+                    "memoryUpdate.communicationPlan", exception);
+        }
+    }
+
+    private void validateMemoryNotes(PlayerTurnContext context, AgentTurnResult result) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        boolean provided = !update.getSuspicionDelta().isEmpty() || !update.getTrustDelta().isEmpty()
+                || !update.getObservationsToAdd().isEmpty() || !update.getCommitmentsToAdd().isEmpty()
+                || !update.getInferredFactsToAdd().isEmpty();
+        if (provided) {
+            recordSectionAccepted(result, "memoryNotes", "memoryUpdate");
+        } else {
+            recordSectionStatus(result, "memoryNotes", "NOT_PROVIDED", "memoryUpdate", null, null);
+        }
+    }
+
+    private void validateVisibleEvidence(PlayerTurnContext context, List<Long> references) {
         Map<Long, Object> availableEvidence = new java.util.LinkedHashMap<>();
         context.observations().events().forEach(event -> availableEvidence.put(event.sequence(), event));
         context.memoryState().worldFacts().forEach(fact -> addEvidence(availableEvidence, fact));
         context.memoryState().publicClaims().forEach(claim -> addEvidence(availableEvidence, claim));
-        for (Long reference : result.getMemoryUpdate().getEvidenceReferences()) {
+        for (Long reference : references) {
             if (reference == null || !availableEvidence.containsKey(reference)) {
                 throw new IllegalStateException("Evidence reference is not visible to this agent: " + reference);
             }
         }
-        result.getMemoryUpdate().getBeliefEvidenceReferences().forEach((playerId, references) -> {
-            if (!result.getMemoryUpdate().getRoleBeliefs().containsKey(playerId)) {
+    }
+
+    private void validateBeliefs(PlayerTurnContext context, AgentTurnResult result) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        Map<Long, Object> availableEvidence = new java.util.LinkedHashMap<>();
+        context.observations().events().forEach(event -> availableEvidence.put(event.sequence(), event));
+        context.memoryState().worldFacts().forEach(fact -> addEvidence(availableEvidence, fact));
+        context.memoryState().publicClaims().forEach(claim -> addEvidence(availableEvidence, claim));
+        update.getBeliefEvidenceReferences().forEach((playerId, references) -> {
+            if (!update.getRoleBeliefs().containsKey(playerId)) {
                 throw new IllegalStateException("Belief evidence has no corresponding role belief for " + playerId);
             }
             for (Long reference : references) {
@@ -134,7 +230,7 @@ public class ValidationRetryPolicy {
                 }
             }
         });
-        result.getMemoryUpdate().getRoleBeliefs().forEach((player, probability) -> {
+        update.getRoleBeliefs().forEach((player, probability) -> {
             if (probability == null || probability < 0.0d || probability > 1.0d) {
                 throw new IllegalStateException("Invalid role belief probability for " + player);
             }
@@ -142,21 +238,10 @@ public class ValidationRetryPolicy {
         });
     }
 
-    private void validateStrategyContract(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
-        Map<String, Object> strategy = result.getMemoryUpdate().getStrategyState();
-        Map<String, Object> communication = result.getMemoryUpdate().getCommunicationPlan();
+    private void validateStrategyContract(PlayerTurnContext context, MemoryUpdate update) {
+        Map<String, Object> strategy = update.getStrategyState();
         requireNonBlank(strategy, "mode", "strategyState.mode");
         requireNonBlank(strategy, "objective", "strategyState.objective");
-        if (action instanceof com.example.avalon.core.game.model.PublicSpeechAction speechAction) {
-            requireNonBlank(communication, "speechAct", "communicationPlan.speechAct");
-            Object plannedMessage = communication.get("publicMessage");
-            if (plannedMessage == null || !speechAction.speechText().trim().equals(String.valueOf(plannedMessage).trim())) {
-                throw new IllegalStateException("communicationPlan.publicMessage must match publicSpeech");
-            }
-            if (!speechAction.speechAct().equals(String.valueOf(communication.get("speechAct")))) {
-                throw new IllegalStateException("communicationPlan.speechAct must match the public action");
-            }
-        }
         Object intentValue = strategy.get("deceptionIntent");
         String intent = intentValue == null ? "NONE" : String.valueOf(intentValue).trim().toUpperCase(Locale.ROOT);
         if (!RoleStrategyPolicy.permittedDeceptionIntents(context.roleId()).contains(intent)) {
@@ -170,6 +255,93 @@ public class ValidationRetryPolicy {
                 throw new IllegalStateException("Merlin exposureRisk must be a number between 0 and 1");
             }
         }
+    }
+
+    private void validateCommunicationContract(MemoryUpdate update, PlayerAction action) {
+        Map<String, Object> communication = update.getCommunicationPlan();
+        if (action instanceof com.example.avalon.core.game.model.PublicSpeechAction speechAction) {
+            requireNonBlank(communication, "speechAct", "communicationPlan.speechAct");
+            Object plannedMessage = communication.get("publicMessage");
+            if (plannedMessage == null || !speechAction.speechText().trim().equals(String.valueOf(plannedMessage).trim())) {
+                throw new IllegalStateException("communicationPlan.publicMessage must match publicSpeech");
+            }
+            if (!speechAction.speechAct().equals(String.valueOf(communication.get("speechAct")))) {
+                throw new IllegalStateException("communicationPlan.speechAct must match the public action");
+            }
+        }
+    }
+
+    private void recordMissingMemorySections(AgentTurnResult result) {
+        boolean malformedMemory = optionalWarningFor(result, "memoryUpdate");
+        for (String section : List.of("memoryNotes", "evidenceAssessments", "beliefUpdate",
+                "strategyState", "communicationPlan")) {
+            String status = malformedMemory ? "DISCARDED" : "NOT_PROVIDED";
+            recordSectionStatus(result, section, status, "memoryUpdate",
+                    malformedMemory ? "deserialization_failed" : null, null);
+        }
+    }
+
+    private void recordPrivateActionAssessment(PlayerTurnContext context, AgentTurnResult result, PlayerAction action) {
+        if (!(action instanceof com.example.avalon.core.game.model.TeamVoteAction)
+                && !(action instanceof com.example.avalon.core.game.model.MissionAction)) {
+            recordSectionStatus(result, "privateActionAssessment", "NOT_PROVIDED",
+                    "privateActionAssessment", null, null);
+            return;
+        }
+        Map<String, Object> assessment = new LinkedHashMap<>();
+        assessment.put("actionType", action.actionType().name());
+        if (action instanceof com.example.avalon.core.game.model.TeamVoteAction vote) {
+            assessment.put("selectedCandidate", vote.vote().name());
+        } else if (action instanceof com.example.avalon.core.game.model.MissionAction mission) {
+            assessment.put("selectedCandidate", mission.choice().name());
+        }
+        MemoryUpdate update = result.getMemoryUpdate();
+        if (update != null) {
+            assessment.put("decisiveEvidenceRefs", List.copyOf(update.getEvidenceReferences()));
+            Object objective = update.getStrategyState().get("objective");
+            if (objective != null) assessment.put("primaryObjective", String.valueOf(objective));
+        }
+        assessment.put("validAtSequence", context.observations().toSequenceInclusive());
+        result.setPrivateActionAssessment(Map.copyOf(assessment));
+        recordSectionAccepted(result, "privateActionAssessment", "privateActionAssessment");
+    }
+
+    private void discardCognitionSection(PlayerTurnContext context, AgentTurnResult result,
+                                         String section, String field, RuntimeException failure) {
+        discardOptionalSection(context, result, field, failure);
+        recordSectionStatus(result, section, "DISCARDED", field, "semantic_validation_failed",
+                failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
+    }
+
+    private void recordSectionAccepted(AgentTurnResult result, String section, String field) {
+        recordSectionStatus(result, section, "ACCEPTED", field, null, null);
+    }
+
+    private void recordSectionStatus(AgentTurnResult result, String section, String status,
+                                     String field, String reason, String message) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("status", status);
+        detail.put("field", field);
+        if (reason != null) detail.put("reason", reason);
+        if (message != null) detail.put("message", message);
+        result.getCognitionSectionStatuses().put(section, Map.copyOf(detail));
+        List<String> accepted = result.getCognitionSectionStatuses().entrySet().stream()
+                .filter(entry -> "ACCEPTED".equals(entry.getValue().get("status")))
+                .map(Map.Entry::getKey)
+                .toList();
+        result.setAcceptedCognitionSections(accepted);
+        result.setCognitionDegraded(result.getCognitionSectionStatuses().values().stream()
+                .anyMatch(value -> "DISCARDED".equals(value.get("status"))));
+    }
+
+    private boolean optionalWarningFor(AgentTurnResult result, String fieldPrefix) {
+        Object warnings = result.getModelMetadata().getAttributes().get(OPTIONAL_SECTION_WARNINGS);
+        if (!(warnings instanceof Iterable<?> values)) return false;
+        for (Object value : values) {
+            if (value instanceof Map<?, ?> warning
+                    && String.valueOf(warning.get("field")).startsWith(fieldPrefix)) return true;
+        }
+        return false;
     }
 
     private void discardOptionalSection(PlayerTurnContext context, AgentTurnResult result,

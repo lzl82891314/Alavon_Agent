@@ -131,7 +131,11 @@ public class LlmPlayerController implements PlayerController {
                 proposed.getBeliefEvidenceReferences(),
                 context.observations().toSequenceInclusive(),
                 proposed.getStrategyMode(),
-                proposed.getLastSummary()
+                proposed.getLastSummary(),
+                turnResult.getCognitionSectionStatuses(),
+                turnResult.isCognitionDegraded(),
+                turnResult.getAcceptedCognitionSections(),
+                turnResult.getPrivateActionAssessment()
         );
     }
 
@@ -209,6 +213,9 @@ public class LlmPlayerController implements PlayerController {
         payload.put("attempts", attempts);
         payload.put("allowedActions", request.getAllowedActions());
         payload.put("outputSchemaVersion", request.getOutputSchemaVersion());
+        payload.put("cognitionDegraded", turnResult.isCognitionDegraded());
+        payload.put("cognitionSectionStatuses", turnResult.getCognitionSectionStatuses());
+        payload.put("acceptedCognitionSections", turnResult.getAcceptedCognitionSections());
         if (turnResult != null
                 && turnResult.getModelMetadata() != null
                 && turnResult.getModelMetadata().getAttributes() != null) {

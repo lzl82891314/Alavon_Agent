@@ -59,6 +59,8 @@ record ConsoleDecisionRow(
         String actionDetail,
         String publicSpeech,
         String privateThought,
+        String acceptedCognition,
+        String deterministicContext,
         String note,
         boolean failed
 ) {

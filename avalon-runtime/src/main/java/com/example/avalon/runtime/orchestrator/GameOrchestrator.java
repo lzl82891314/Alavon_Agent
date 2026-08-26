@@ -487,7 +487,9 @@ public class GameOrchestrator {
                 update.suspicionDelta(), update.trustDelta(), update.observationsToAdd(), hostCommitments,
                 update.inferredFactsToAdd(), update.worldFactsToAdd(), hostPublicClaims,
                 update.roleBeliefs(), strategyState, update.communicationPlan(), update.evidenceReferences(),
-                update.beliefEvidenceReferences(), update.observedThroughSequence(), update.strategyMode(), update.lastSummary());
+                update.beliefEvidenceReferences(), update.observedThroughSequence(), update.strategyMode(), update.lastSummary(),
+                update.cognitionSectionStatuses(), update.cognitionDegraded(), update.acceptedCognitionSections(),
+                update.privateActionAssessment());
     }
 
     private List<String> revisedCommitments(

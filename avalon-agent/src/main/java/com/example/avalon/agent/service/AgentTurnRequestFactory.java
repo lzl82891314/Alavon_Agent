@@ -3,6 +3,8 @@ package com.example.avalon.agent.service;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.ModelProfile;
 import com.example.avalon.agent.model.PlayerAgentConfig;
+import com.example.avalon.agent.analysis.DeterministicStrategicEvidenceAnalyzer;
+import com.example.avalon.agent.social.SocialInfluencePlanner;
 import com.example.avalon.core.game.model.PlayerTurnContext;
 import com.example.avalon.core.player.memory.VisiblePlayerInfo;
 import com.example.avalon.agent.strategy.RoleStrategyPlanner;
@@ -18,10 +20,16 @@ import java.util.Map;
 public class AgentTurnRequestFactory {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final RoleStrategyPlanner roleStrategyPlanner;
+    private final DeterministicStrategicEvidenceAnalyzer evidenceAnalyzer;
+    private final SocialInfluencePlanner socialInfluencePlanner;
     private final MemoryContextProjector memoryContextProjector;
 
-    public AgentTurnRequestFactory(RoleStrategyPlanner roleStrategyPlanner) {
+    public AgentTurnRequestFactory(RoleStrategyPlanner roleStrategyPlanner,
+                                   DeterministicStrategicEvidenceAnalyzer evidenceAnalyzer,
+                                   SocialInfluencePlanner socialInfluencePlanner) {
         this.roleStrategyPlanner = roleStrategyPlanner;
+        this.evidenceAnalyzer = evidenceAnalyzer;
+        this.socialInfluencePlanner = socialInfluencePlanner;
         this.memoryContextProjector = new MemoryContextProjector();
     }
 
@@ -43,7 +51,6 @@ public class AgentTurnRequestFactory {
         request.setPublicState(publicState(context));
         Map<String, Object> memory = memory(context);
         request.setMemory(memory);
-        request.setStrategyContext(roleStrategyPlanner.plan(context, agentConfig));
         request.setObservationDelta(context.observations().events().stream()
                 .map(event -> objectMapper.convertValue(event, new TypeReference<Map<String, Object>>() { }))
                 .filter(event -> !memoryClaimSequences(memory).contains(sequenceOf(event)))
@@ -53,6 +60,11 @@ public class AgentTurnRequestFactory {
         request.setDiscussionDirective(objectMapper.convertValue(context.discussionDirective(),
                 new TypeReference<Map<String, Object>>() { }));
         request.setAllowedActions(context.allowedActions().allowedActionTypes().stream().map(Enum::name).toList());
+        Map<String, Object> strategyContext = new LinkedHashMap<>(roleStrategyPlanner.plan(context, agentConfig));
+        strategyContext.putAll(evidenceAnalyzer.analyze(request).asMap());
+        strategyContext.put("audiencePlan", objectMapper.convertValue(socialInfluencePlanner.plan(request),
+                new TypeReference<Map<String, Object>>() { }));
+        request.setStrategyContext(strategyContext);
         request.setRulesSummary(context.rulesSummary());
         request.setOutputSchemaVersion(defaultString(agentConfig.getOutputSchemaVersion(), "v1"));
         return request;

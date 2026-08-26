@@ -57,8 +57,11 @@ public final class PromptBuilder {
                 4. 如果提供 communicationPlan，请说明 speechAct、desiredAudienceBeliefs、evidenceToMention、evidenceToWithhold 和 publicMessage。
                 5. 公开表达必须服务于策略；不要复述规则、回合进度或泛泛地说“继续观察”。
                 6. 如果当前是 TARGETED_RESPONSES，必须回答讨论指令指定的质疑；如果是 LEADER_SYNTHESIS，必须综合争议后给出队伍判断。
-                7. action.speechText、communicationPlan.publicMessage、publicSpeech 和 privateThought 必须使用简体中文，不得写英文句子；P1 之类的玩家编号和 JSON 契约规定的英文枚举不受此限制。
-                8. 不输出原始思维链。privateThought 只写一句简短的中文策略摘要；只输出下面的结构化决策产物和动作。
+                7. 优先使用宿主提供的 voteEvidence、teamCandidates、missionConstraints 和 contradictionCandidates；至少比较两个可行队伍、投票或沟通方案，并说明选择依据。
+                8. 依据角色策略选择当前模式和风险档位；刺客从非刺杀阶段持续更新梅林候选，不要把刺杀只当作最终失败后的流程动作。
+                9. audiencePlan 和 highRiskRoleClaim 只是候选计划。高风险身份声明必须同时评估目标、预期反应、风险和退出叙事，不得因为存在候选就强制执行。
+                10. action.speechText、communicationPlan.publicMessage、publicSpeech 和 privateThought 必须使用简体中文，不得写英文句子；P1 之类的玩家编号和 JSON 契约规定的英文枚举不受此限制。
+                11. 不输出原始思维链。privateThought 只写一句简短的中文策略摘要；只输出下面的结构化决策产物和动作。
 
                 ## 输出契约
                 只返回一个 JSON 对象：
