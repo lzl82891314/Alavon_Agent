@@ -29,6 +29,7 @@ public class LlmPlayerController implements PlayerController {
     private static final List<String> RAW_METADATA_ATTRIBUTE_KEYS = List.of(
             "assistantContentShape",
             "assistantContentPreview",
+            "reasoningDetails",
             "reasoningDetailsPreview",
             "contentPresent",
             "reasoningDetailsPresent",

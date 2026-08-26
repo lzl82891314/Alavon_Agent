@@ -51,6 +51,7 @@ public class ConsoleTranscriptPrinter {
                   replay         查看面向阅读的回放投影
                   audit          查看持久化审计记录
                   probe-model    测试指定 model profile 的连通性与结构化兼容性
+                  log-level      设置实时日志级别：info、debug、trace
                   help           显示本帮助
                   exit           退出控制台
 
@@ -74,8 +75,10 @@ public class ConsoleTranscriptPrinter {
                 .append(session.seed() == null ? "-" : session.seed());
         for (ConsoleGameSession.SeatDescriptor seat : session.seats()) {
             builder.append(System.lineSeparator())
-                    .append("  ")
-                    .append(seat.summary());
+                .append("  ")
+                .append(seat.summary());
+            String resolvedModel = session.resolvedModelName(seat.playerId());
+            if (resolvedModel != null) builder.append(" | 实际模型=").append(resolvedModel);
         }
         if (session.llmSelectionSummary() != null) {
             builder.append(System.lineSeparator())
@@ -160,8 +163,11 @@ public class ConsoleTranscriptPrinter {
             }
             case "PLAYER_ACTION" -> {
                 builder.append(System.lineSeparator())
-                        .append("  座位=").append(session.labelForSeat(payload.get("seatNo")))
-                        .append(" 动作=").append(actionTypeLabel(payload.get("actionType")));
+                        .append("  身份=").append(roleLabel(session.roleForPlayer(event.getActorId())));
+                if (session.isCurrentLeader(payload.get("seatNo"))) {
+                    builder.append(" | 队长");
+                }
+                builder.append(" | 动作=").append(actionTypeLabel(payload.get("actionType")));
                 String speech = stringValue(payload.get("speech"));
                 if (speech != null) {
                     builder.append(System.lineSeparator()).append("  公开发言=").append(speech);
@@ -231,13 +237,17 @@ public class ConsoleTranscriptPrinter {
         return builder.toString();
     }
 
-    public String formatInlineThought(GameAuditEntryResponse entry, ConsoleGameSession session) {
+    public String formatInlineThought(GameAuditEntryResponse entry, ConsoleGameSession session,
+                                      ConsoleLogLevel logLevel) {
         StringBuilder builder = new StringBuilder();
         builder.append("[思考] ").append(session.labelForPlayer(entry.getPlayerId()));
         String privateThought = privateThought(entry);
         Map<String, Object> validation = structuredMap(entry.getValidationResultJson());
         builder.append(System.lineSeparator())
                 .append("  私有思考=").append(privateThought == null ? "未提供私有思考" : privateThought);
+        if (logLevel == ConsoleLogLevel.INFO) {
+            return builder.toString();
+        }
         appendResponseDiagnostics(builder, structuredMap(entry.getRawModelResponseJson()), privateThought);
         appendOptionalSectionWarnings(builder, validation);
         String reasonSummary = reasonSummary(entry.getAuditReasonJson());
@@ -254,6 +264,12 @@ public class ConsoleTranscriptPrinter {
         if (detailedError != null) {
             builder.append(System.lineSeparator())
                     .append("  错误=").append(detailedError);
+        }
+        if (logLevel == ConsoleLogLevel.TRACE) {
+            appendJsonBlock(builder, "模型原始响应", entry.getRawModelResponseJson());
+            appendJsonBlock(builder, "解析动作", entry.getParsedActionJson());
+            appendJsonBlock(builder, "决策依据", entry.getAuditReasonJson());
+            appendJsonBlock(builder, "校验结果", entry.getValidationResultJson());
         }
         return builder.toString();
     }
@@ -650,6 +666,10 @@ public class ConsoleTranscriptPrinter {
         String privateThought = stringValue(rawModelResponse.get("privateThought"));
         if (privateThought != null) {
             return privateThought;
+        }
+        String reasoningDetails = stringValue(rawModelResponse.get("reasoningDetails"));
+        if (reasoningDetails != null) {
+            return reasoningDetails;
         }
         String reasoningPreview = stringValue(rawModelResponse.get("reasoningDetailsPreview"));
         if (reasoningPreview != null) {

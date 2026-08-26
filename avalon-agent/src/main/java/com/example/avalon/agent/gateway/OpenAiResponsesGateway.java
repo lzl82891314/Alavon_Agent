@@ -78,6 +78,7 @@ public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
             attributes.put("streaming", true);
             attributes.put("transportAttempts", streamResponse.transportAttempts());
             attributes.put("reasoningChars", accumulator.reasoningChars());
+            putIfPresent(attributes, "reasoningDetails", accumulator.reasoning());
             putIfPresent(attributes, "reasoningDetailsPreview", OpenAiCompatibleSupport.contentPreview(accumulator.reasoning()));
             putIfPresent(attributes, "firstReasoningDeltaMs", accumulator.firstReasoningDeltaMs());
             putIfPresent(attributes, "firstContentDeltaMs", accumulator.firstContentDeltaMs());

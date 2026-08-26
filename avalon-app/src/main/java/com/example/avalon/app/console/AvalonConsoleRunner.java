@@ -217,6 +217,14 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                 probeModel(parts);
                 yield true;
             }
+            case "log-level" -> {
+                if (parts.length < 2) {
+                    throw new IllegalArgumentException("用法：log-level <info|debug|trace>");
+                }
+                session.setLogLevel(ConsoleLogLevel.parse(parts[1]));
+                System.out.println("实时日志级别=" + session.logLevel());
+                yield true;
+            }
             case "help" -> {
                 System.out.println(printer.helpText());
                 yield true;
@@ -242,11 +250,12 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         CreateGameRequest request = buildCreateRequest(reader);
         GameSummaryResponse summary = gameApplicationService.createGame(request);
         session.activateNewGame(summary.getGameId(), request);
+        session.resolveRandomPoolModelNames(modelProfileCatalogService.listAll());
 
         System.out.println("已创建新游戏 " + summary.getGameId() + "，状态=" + summary.getStatus());
         System.out.println(printer.formatConfig(session));
         printNewEvents();
-        printState();
+        printStateIfDebug();
         System.out.println("输入 `start` 开始游戏，或输入 `run` 直接慢速播放整局。");
     }
 
@@ -508,7 +517,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private CreateGameRequest.LlmSelectionRequest promptRandomPoolSelection(BufferedReader reader) {
         List<ModelProfileResponse> profiles = availableModelProfiles();
         printModelProfiles(profiles);
-        System.out.println("将从全部已启用 model profile 中按本局 seed 随机分配；模型可被多个席位复用。");
+        System.out.println("将按候选 model profile 顺序轮询分配；席位多于模型时从第一个模型继续循环。");
         CreateGameRequest.LlmSelectionRequest request = new CreateGameRequest.LlmSelectionRequest();
         request.setMode("RANDOM_POOL");
         return request;
@@ -582,16 +591,32 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             throw new IllegalArgumentException("用法：use <gameId>");
         }
         session.useExistingGame(parts[1]);
+        GameStateResponse state = gameApplicationService.getState(parts[1]);
+        syncCurrentLeader(state);
+        if (!"WAITING".equals(state.getStatus())) {
+            refreshPlayerRoles();
+        }
         System.out.println("已绑定到现有游戏 " + parts[1] + "。");
-        printState();
+        printStateIfDebug();
     }
 
     private void startActiveGame() {
         String gameId = ensureActiveGame();
         GameSummaryResponse summary = gameApplicationService.startGame(gameId);
+        syncCurrentLeader(gameApplicationService.getState(gameId));
+        refreshPlayerRoles();
         System.out.println("游戏已启动，状态=" + summary.getStatus());
         printNewEvents();
-        printState();
+        printStateIfDebug();
+    }
+
+    private void refreshPlayerRoles() {
+        for (int seatNo = 1; seatNo <= activePlayerCount(); seatNo++) {
+            String playerId = "P" + seatNo;
+            PlayerPrivateViewResponse view = adminGameInspectionService.getPlayerView(
+                    session.gameId(), playerId, adminInspectionCapability);
+            session.rememberRole(playerId, view.getRoleSummary());
+        }
     }
 
     private void stepActiveGame() {
@@ -601,11 +626,12 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             System.out.println("游戏尚未开始。请先执行 `start` 或直接执行 `run`。");
             return;
         }
+        syncCurrentLeader(before);
         gameApplicationService.stepGame(gameId);
         printNewEvents();
         printNewAudits();
         GameStateResponse after = gameApplicationService.getState(gameId);
-        System.out.println(printer.formatState(after, session));
+        printStateIfDebug(after);
         printDecisionReportIfTerminal(after, before.getStatus());
     }
 
@@ -619,13 +645,14 @@ public class AvalonConsoleRunner implements ApplicationRunner {
 
         int safety = 500;
         while ("RUNNING".equals(state.getStatus()) && safety-- > 0) {
+            syncCurrentLeader(state);
             announceTurn(state);
             playbackDelayer.sleep(playbackSettings.enabled() ? playbackSettings.actorLeadInMs() : 0L);
             gameApplicationService.stepGame(gameId);
             printNewEvents();
             printNewAudits();
             state = gameApplicationService.getState(gameId);
-            System.out.println(printer.formatState(state, session));
+            printStateIfDebug(state);
             playbackDelayer.sleep(playbackSettings.enabled() ? playbackSettings.afterStepMs() : 0L);
         }
 
@@ -635,6 +662,10 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         if ("ENDED".equals(state.getStatus()) || "PAUSED".equals(state.getStatus())) {
             printDecisionReport(state);
         }
+    }
+
+    private void syncCurrentLeader(GameStateResponse state) {
+        session.updateCurrentLeader(state.getPublicState() == null ? null : state.getPublicState().get("leaderSeat"));
     }
 
     private void announceTurn(GameStateResponse state) {
@@ -648,6 +679,18 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         String gameId = ensureActiveGame();
         GameStateResponse state = gameApplicationService.getState(gameId);
         System.out.println(printer.formatState(state, session));
+    }
+
+    private void printStateIfDebug() {
+        if (session.logLevel() != ConsoleLogLevel.INFO) {
+            printState();
+        }
+    }
+
+    private void printStateIfDebug(GameStateResponse state) {
+        if (session.logLevel() != ConsoleLogLevel.INFO) {
+            System.out.println(printer.formatState(state, session));
+        }
     }
 
     private void printAllPlayerViews() {
@@ -741,7 +784,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         auditEntries.stream()
                 .filter(entry -> entry.getEventSeqNo() != null && entry.getEventSeqNo() > session.lastPrintedAuditEventSeqNo())
                 .forEach(entry -> {
-                    System.out.println(printer.formatInlineThought(entry, session));
+                    System.out.println(printer.formatInlineThought(entry, session, session.logLevel()));
                     session.updateLastPrintedAuditEventSeqNo(entry.getEventSeqNo());
                 });
     }

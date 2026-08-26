@@ -138,6 +138,7 @@ public final class OpenAiCompatibleSupport {
                         true,
                         "reasoning_json_object",
                         null,
+                        reasoningContent,
                         reasoningPreview,
                         normalizedReasoning
                 );
@@ -147,6 +148,7 @@ public final class OpenAiCompatibleSupport {
                     reasoningPresent,
                     reasoningPresent ? "reasoning_only" : "missing_content",
                     null,
+                    reasoningContent,
                     reasoningPreview,
                     null
             );
@@ -160,6 +162,7 @@ public final class OpenAiCompatibleSupport {
                     reasoningPresent,
                     content.strip().startsWith("<think>") ? "think_prefixed_json" : "json_object",
                     originalPreview,
+                    reasoningContent,
                     reasoningPreview,
                     normalized
             );
@@ -170,6 +173,7 @@ public final class OpenAiCompatibleSupport {
                     reasoningPresent,
                     "truncated_json_candidate",
                     originalPreview,
+                    reasoningContent,
                     reasoningPreview,
                     null
             );
@@ -182,6 +186,7 @@ public final class OpenAiCompatibleSupport {
                     reasoningPresent,
                     "markdown_code_block",
                     originalPreview,
+                    reasoningContent,
                     reasoningPreview,
                     codeBlock
             );
@@ -192,6 +197,7 @@ public final class OpenAiCompatibleSupport {
                     reasoningPresent,
                     "truncated_json_candidate",
                     originalPreview,
+                    reasoningContent,
                     reasoningPreview,
                     null
             );
@@ -204,6 +210,7 @@ public final class OpenAiCompatibleSupport {
                     reasoningPresent,
                     "embedded_json_object",
                     originalPreview,
+                    reasoningContent,
                     reasoningPreview,
                     embeddedJson
             );
@@ -215,6 +222,7 @@ public final class OpenAiCompatibleSupport {
                 reasoningPresent,
                 shape,
                 originalPreview,
+                reasoningContent,
                 reasoningPreview,
                 null
         );

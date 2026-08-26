@@ -17,9 +17,14 @@ final class ConsoleGameSession {
     private long lastPrintedAuditEventSeqNo;
     private final Map<String, SeatDescriptor> seatsByPlayerId = new LinkedHashMap<>();
     private final Map<Integer, SeatDescriptor> seatsBySeatNo = new LinkedHashMap<>();
+    private final Map<String, String> rolesByPlayerId = new LinkedHashMap<>();
     private Long seed;
     private String llmSelectionSummary;
     private final List<String> llmSelectionDetails = new ArrayList<>();
+    private List<String> randomPoolModelIds = List.of();
+    private final Map<String, String> resolvedModelNamesByPlayerId = new LinkedHashMap<>();
+    private ConsoleLogLevel logLevel = ConsoleLogLevel.INFO;
+    private Integer currentLeaderSeat;
 
     String gameId() {
         return gameId;
@@ -41,6 +46,22 @@ final class ConsoleGameSession {
         return seed;
     }
 
+    ConsoleLogLevel logLevel() { return logLevel; }
+
+    String resolvedModelName(String playerId) { return resolvedModelNamesByPlayerId.get(playerId); }
+
+    String roleForPlayer(String playerId) { return rolesByPlayerId.get(playerId); }
+
+    void rememberRole(String playerId, String roleId) {
+        if (playerId != null && roleId != null && !roleId.isBlank()) rolesByPlayerId.put(playerId, roleId);
+    }
+
+    void updateCurrentLeader(Object seatNo) { currentLeaderSeat = parseSeatNo(seatNo); }
+
+    boolean isCurrentLeader(Object seatNo) { return currentLeaderSeat != null && currentLeaderSeat.equals(parseSeatNo(seatNo)); }
+
+    void setLogLevel(ConsoleLogLevel logLevel) { this.logLevel = logLevel; }
+
     void updateLastPrintedEventSeqNo(long seqNo) {
         lastPrintedEventSeqNo = Math.max(lastPrintedEventSeqNo, seqNo);
     }
@@ -55,9 +76,13 @@ final class ConsoleGameSession {
         this.lastPrintedAuditEventSeqNo = 0L;
         this.seatsByPlayerId.clear();
         this.seatsBySeatNo.clear();
+        this.rolesByPlayerId.clear();
         this.seed = request.getSeed();
         this.llmSelectionSummary = null;
         this.llmSelectionDetails.clear();
+        this.randomPoolModelIds = List.of();
+        this.resolvedModelNamesByPlayerId.clear();
+        this.currentLeaderSeat = null;
 
         boolean pooledSelectionEnabled = request.getLlmSelection() != null
                 && request.getLlmSelection().getMode() != null
@@ -92,10 +117,29 @@ final class ConsoleGameSession {
                         llmSelectionDetails.add(roleId + " -> " + modelId));
             } else if ("RANDOM_POOL".equalsIgnoreCase(request.getLlmSelection().getMode())) {
                 List<String> candidateModelIds = request.getLlmSelection().getCandidateModelIds();
+                randomPoolModelIds = candidateModelIds == null ? List.of() : List.copyOf(candidateModelIds);
                 llmSelectionDetails.add(candidateModelIds.isEmpty()
                         ? "pool=all enabled model profiles"
                         : "pool=" + candidateModelIds);
             }
+        }
+    }
+
+    void resolveRandomPoolModelNames(List<com.example.avalon.api.dto.ModelProfileResponse> profiles) {
+        if (!"RANDOM_POOL".equalsIgnoreCase(llmSelectionSummary) || seed == null) return;
+        List<String> candidateIds = new ArrayList<>();
+        if (randomPoolModelIds.isEmpty()) {
+            profiles.stream().filter(p -> p.isEnabled()).forEach(p -> candidateIds.add(p.getModelId()));
+        } else {
+            candidateIds.addAll(randomPoolModelIds);
+        }
+        int modelIndex = 0;
+        for (SeatDescriptor seat : seats()) {
+            if (!"大模型(模型池)".equals(seat.controllerType())) continue;
+            String modelId = candidateIds.get(modelIndex++ % candidateIds.size());
+            profiles.stream().filter(p -> modelId.equals(p.getModelId())).findFirst()
+                    .ifPresent(profile -> resolvedModelNamesByPlayerId.put(seat.playerId(),
+                            profile.getModelName() + " (" + modelId + ")"));
         }
     }
 
@@ -105,9 +149,13 @@ final class ConsoleGameSession {
         this.lastPrintedAuditEventSeqNo = 0L;
         this.seatsByPlayerId.clear();
         this.seatsBySeatNo.clear();
+        this.rolesByPlayerId.clear();
         this.seed = null;
         this.llmSelectionSummary = null;
         this.llmSelectionDetails.clear();
+        this.randomPoolModelIds = List.of();
+        this.resolvedModelNamesByPlayerId.clear();
+        this.currentLeaderSeat = null;
     }
 
     Collection<SeatDescriptor> seats() {

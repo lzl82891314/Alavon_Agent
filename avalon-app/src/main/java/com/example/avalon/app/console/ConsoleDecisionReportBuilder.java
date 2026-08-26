@@ -297,6 +297,10 @@ public class ConsoleDecisionReportBuilder {
         if (privateThought != null) {
             return privateThought;
         }
+        String reasoningDetails = normalizeText(stringValue(rawModelResponse.get("reasoningDetails")));
+        if (reasoningDetails != null) {
+            return reasoningDetails;
+        }
         String reasoningPreview = normalizeText(stringValue(rawModelResponse.get("reasoningDetailsPreview")));
         if (reasoningPreview != null) {
             return reasoningPreview;

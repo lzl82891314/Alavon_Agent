@@ -18,7 +18,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 
 @Service
 public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializer {
@@ -46,7 +45,7 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
         return switch (selectionConfig.mode()) {
             case SEAT_BINDING -> resolveSeatBindings(llmPlayers, selectionConfig);
             case ROLE_BINDING -> resolveRoleBindings(state, llmPlayers, selectionConfig);
-            case RANDOM_POOL -> resolveRandomPool(llmPlayers, selectionConfig, state.setup().seed());
+            case RANDOM_POOL -> resolveModelPool(llmPlayers, selectionConfig);
             case NONE -> Map.of();
         };
     }
@@ -79,18 +78,17 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
         return resolvedConfigs;
     }
 
-    private Map<String, Map<String, Object>> resolveRandomPool(List<PlayerRegistration> llmPlayers,
-                                                               LlmSelectionConfig selectionConfig,
-                                                               long seed) {
+    private Map<String, Map<String, Object>> resolveModelPool(List<PlayerRegistration> llmPlayers,
+                                                              LlmSelectionConfig selectionConfig) {
         List<String> candidateIds = new ArrayList<>(new LinkedHashSet<>(selectionConfig.candidateModelIds()));
         if (candidateIds.isEmpty()) {
             throw new IllegalArgumentException("Random model pool must contain at least one modelId");
         }
-        Random random = new Random(seed);
         Map<String, Map<String, Object>> resolvedConfigs = new LinkedHashMap<>();
         for (int index = 0; index < llmPlayers.size(); index++) {
             PlayerRegistration player = llmPlayers.get(index);
-            CatalogModelProfile profile = modelProfileCatalogService.requireEnabledProfile(candidateIds.get(random.nextInt(candidateIds.size())));
+            String modelId = candidateIds.get(index % candidateIds.size());
+            CatalogModelProfile profile = modelProfileCatalogService.requireEnabledProfile(modelId);
             resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player, profile));
         }
         return resolvedConfigs;

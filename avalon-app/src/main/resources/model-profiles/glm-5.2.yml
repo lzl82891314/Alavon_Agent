@@ -1,13 +1,15 @@
 # Template only: this provider is routed through the shared OpenAI-compatible gateway.
-modelId: glm-5
-displayName: glm-5
+modelId: z-ai/glm-5.2
+displayName: glm-5.2
 provider: glm
 protocol: OPENAI_COMPATIBLE_CHAT
-modelName: glm-5
+modelName: z-ai/glm-5.2
 temperature: 0.2
-enabled: false
+enabled: true
 providerOptions:
   baseUrl: https://gcapi.cn/v1
+  apiKeyEnv: DEEPSEEK_API_KEY
+  timeoutMillis: 300000
   instructionRole: system
   response_format:
     type: json_object

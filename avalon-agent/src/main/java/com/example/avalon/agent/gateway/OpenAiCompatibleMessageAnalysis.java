@@ -8,6 +8,7 @@ public record OpenAiCompatibleMessageAnalysis(
         boolean reasoningDetailsPresent,
         String assistantContentShape,
         String assistantContentPreview,
+        String reasoningDetails,
         String reasoningDetailsPreview,
         String jsonCandidate
 ) {
@@ -21,6 +22,7 @@ public record OpenAiCompatibleMessageAnalysis(
         payload.put("reasoningDetailsPresent", reasoningDetailsPresent);
         putIfNotBlank(payload, "assistantContentShape", assistantContentShape);
         putIfNotBlank(payload, "assistantContentPreview", assistantContentPreview);
+        putIfNotBlank(payload, "reasoningDetails", reasoningDetails);
         putIfNotBlank(payload, "reasoningDetailsPreview", reasoningDetailsPreview);
         return payload;
     }
