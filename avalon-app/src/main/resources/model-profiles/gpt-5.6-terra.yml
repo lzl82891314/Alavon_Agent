@@ -1,0 +1,14 @@
+modelId: gpt-5.6-terra
+displayName: GPT-5.6 Terra
+provider: openai
+protocol: OPENAI_COMPATIBLE_CHAT
+modelName: gpt-5.6-terra
+temperature: 0.2
+enabled: true
+providerOptions:
+  baseUrl: https://gcapi.cn/v1
+  apiKeyEnv: DEEPSEEK_API_KEY
+  timeoutMillis: 300000
+  instructionRole: system
+  response_format:
+    type: json_object
