@@ -195,7 +195,8 @@ public class GameOrchestrator {
                     TeamVoteAction vote = (TeamVoteAction) result.action();
                     state.putVote(voter.seatNo(), vote.vote());
                 }
-                state.appendEvent("TEAM_VOTES_REVEALED", GamePhase.TEAM_VOTE, "SYSTEM", Map.of("votes", state.currentVotes()));
+                Map<Integer, VoteChoice> votesSnapshot = new LinkedHashMap<>(state.currentVotes());
+                state.appendEvent("TEAM_VOTES_REVEALED", GamePhase.TEAM_VOTE, "SYSTEM", Map.of("votes", votesSnapshot));
                 long approves = state.currentVotes().values().stream().filter(v -> v == VoteChoice.APPROVE).count();
                 if (approves > state.currentVotes().size() - approves) {
                     state.phase(GamePhase.MISSION_ACTION);
