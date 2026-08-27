@@ -22,7 +22,11 @@ public record MemoryUpdate(
         Map<String, Map<String, Object>> cognitionSectionStatuses,
         boolean cognitionDegraded,
         List<String> acceptedCognitionSections,
-        Map<String, Object> privateActionAssessment
+        Map<String, Object> privateActionAssessment,
+        List<PossibleWorld> worldHypotheses,
+        List<BehaviorPrediction> activePredictions,
+        List<EvidenceAssessment> evidenceAssessments,
+        List<StrategicActionCandidate> actionAssessments
 ) {
 
     public MemoryUpdate(
@@ -45,7 +49,35 @@ public record MemoryUpdate(
         this(suspicionDelta, trustDelta, observationsToAdd, commitmentsToAdd, inferredFactsToAdd,
                 worldFactsToAdd, publicClaimsToAdd, roleBeliefs, strategyState, communicationPlan,
                 evidenceReferences, beliefEvidenceReferences, observedThroughSequence, strategyMode,
-                lastSummary, Map.of(), false, List.of(), Map.of());
+                lastSummary, Map.of(), false, List.of(), Map.of(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    public MemoryUpdate(
+            Map<String, Double> suspicionDelta,
+            Map<String, Double> trustDelta,
+            List<String> observationsToAdd,
+            List<String> commitmentsToAdd,
+            List<String> inferredFactsToAdd,
+            List<Map<String, Object>> worldFactsToAdd,
+            List<Map<String, Object>> publicClaimsToAdd,
+            Map<String, Double> roleBeliefs,
+            Map<String, Object> strategyState,
+            Map<String, Object> communicationPlan,
+            List<Long> evidenceReferences,
+            Map<String, List<Long>> beliefEvidenceReferences,
+            Long observedThroughSequence,
+            String strategyMode,
+            String lastSummary,
+            Map<String, Map<String, Object>> cognitionSectionStatuses,
+            boolean cognitionDegraded,
+            List<String> acceptedCognitionSections,
+            Map<String, Object> privateActionAssessment
+    ) {
+        this(suspicionDelta, trustDelta, observationsToAdd, commitmentsToAdd, inferredFactsToAdd,
+                worldFactsToAdd, publicClaimsToAdd, roleBeliefs, strategyState, communicationPlan,
+                evidenceReferences, beliefEvidenceReferences, observedThroughSequence, strategyMode,
+                lastSummary, cognitionSectionStatuses, cognitionDegraded, acceptedCognitionSections,
+                privateActionAssessment, List.of(), List.of(), List.of(), List.of());
     }
 
     public MemoryUpdate {
@@ -64,6 +96,10 @@ public record MemoryUpdate(
         cognitionSectionStatuses = copySectionStatuses(cognitionSectionStatuses);
         acceptedCognitionSections = acceptedCognitionSections == null ? List.of() : List.copyOf(acceptedCognitionSections);
         privateActionAssessment = privateActionAssessment == null ? Map.of() : Map.copyOf(privateActionAssessment);
+        worldHypotheses = worldHypotheses == null ? List.of() : List.copyOf(worldHypotheses);
+        activePredictions = activePredictions == null ? List.of() : List.copyOf(activePredictions);
+        evidenceAssessments = evidenceAssessments == null ? List.of() : List.copyOf(evidenceAssessments);
+        actionAssessments = actionAssessments == null ? List.of() : List.copyOf(actionAssessments);
         strategyState = Map.copyOf(strategyState);
         roleBeliefs.forEach((player, probability) -> {
             if (probability == null || probability < 0.0d || probability > 1.0d) {

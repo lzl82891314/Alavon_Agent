@@ -135,7 +135,11 @@ public class LlmPlayerController implements PlayerController {
                 turnResult.getCognitionSectionStatuses(),
                 turnResult.isCognitionDegraded(),
                 turnResult.getAcceptedCognitionSections(),
-                turnResult.getPrivateActionAssessment()
+                turnResult.getPrivateActionAssessment(),
+                proposed.getWorldHypotheses(),
+                proposed.getActivePredictions(),
+                proposed.getEvidenceAssessments(),
+                proposed.getActionAssessments()
         );
     }
 

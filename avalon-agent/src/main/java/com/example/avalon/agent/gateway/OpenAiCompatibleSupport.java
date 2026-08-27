@@ -345,6 +345,20 @@ public final class OpenAiCompatibleSupport {
         String model = request == null || request.getModelName() == null || request.getModelName().isBlank()
                 ? defaultModel
                 : request.getModelName();
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("failureDomain", "protocol");
+        diagnostics.put("failureKind", normalizedProtocolFailureKind(exception, failureKind));
+        if (exception instanceof OpenAiChatSseErrorException sseError) {
+            if (sseError.code() != null && !sseError.code().isBlank()) {
+                diagnostics.put("upstreamErrorCode", sseError.code());
+            }
+            if (sseError.errorMessage() != null && !sseError.errorMessage().isBlank()) {
+                diagnostics.put("upstreamErrorMessage", sseError.errorMessage());
+            }
+            if (sseError.metadata() != null && !sseError.metadata().isBlank()) {
+                diagnostics.put("upstreamErrorMetadata", sseError.metadata());
+            }
+        }
         return new OpenAiCompatibleResponseException(
                 exception.getMessage() == null ? "Model SSE response was invalid" : exception.getMessage(),
                 exception,
@@ -352,8 +366,33 @@ public final class OpenAiCompatibleSupport {
                 model == null ? "unknown" : model,
                 null,
                 null,
-                Map.of("failureDomain", "protocol", "failureKind", failureKind)
+                diagnostics
         );
+    }
+
+    private static String normalizedProtocolFailureKind(RuntimeException exception, String fallback) {
+        if (exception instanceof OpenAiChatSseErrorException sseError) {
+            if ("upstream_stream_read_error".equalsIgnoreCase(sseError.code())
+                    || (sseError.errorMessage() != null
+                    && sseError.errorMessage().toLowerCase(java.util.Locale.ROOT)
+                    .contains("upstream response stream was interrupted"))) {
+                return "stream_interrupted";
+            }
+            if (isProviderUnavailable(sseError)) {
+                return "provider_unavailable";
+            }
+        }
+        return fallback;
+    }
+
+    private static boolean isProviderUnavailable(OpenAiChatSseErrorException error) {
+        String code = error.code();
+        if ("502".equals(code) || "503".equals(code) || "504".equals(code)) {
+            return true;
+        }
+        String metadata = error.metadata();
+        return metadata != null && metadata.toLowerCase(java.util.Locale.ROOT)
+                .contains("provider_unavailable");
     }
 
     private static <T> T parseOptionalSection(ObjectMapper objectMapper,

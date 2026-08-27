@@ -1,5 +1,6 @@
 package com.example.avalon.agent.strategy;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,6 +31,40 @@ public final class RoleStrategyPolicy {
                 .filter(definition -> candidates.contains(definition.mode()))
                 .map(StrategyModeDefinition::asMap)
                 .toList();
+    }
+
+    /** Relative evaluation dimensions; values guide comparison and never prescribe a fixed action. */
+    public static Map<String, Double> objectiveWeights(String role) {
+        Map<String, Double> weights = new LinkedHashMap<>();
+        switch (normalize(role)) {
+            case "MERLIN" -> putWeights(weights, 0.45, 0.25, 0.30, 0.00);
+            case "PERCIVAL" -> putWeights(weights, 0.30, 0.30, 0.25, 0.15);
+            case "MORGANA" -> putWeights(weights, 0.40, 0.20, 0.25, 0.15);
+            case "ASSASSIN" -> putWeights(weights, 0.35, 0.20, 0.20, 0.25);
+            case "MORDRED", "OBERON" -> putWeights(weights, 0.45, 0.20, 0.20, 0.15);
+            default -> putWeights(weights, 0.45, 0.30, 0.15, 0.10);
+        }
+        return Map.copyOf(weights);
+    }
+
+    public static Map<String, Double> riskBudget(String role, String phase, int successfulMissions, int failedMissions) {
+        boolean decisive = successfulMissions >= 2 || failedMissions >= 2;
+        double exposure = switch (normalize(role)) {
+            case "MERLIN" -> decisive ? 0.35 : 0.25;
+            case "PERCIVAL" -> decisive ? 0.45 : 0.35;
+            case "MORGANA", "ASSASSIN", "MORDRED", "OBERON" -> decisive ? 0.65 : 0.45;
+            default -> decisive ? 0.50 : 0.35;
+        };
+        double commitment = "ASSASSINATION".equals(normalize(phase)) ? 0.80 : decisive ? 0.55 : 0.40;
+        return Map.of("maxExposureCost", exposure, "maxCommitmentCost", commitment);
+    }
+
+    private static void putWeights(Map<String, Double> target, double campValue, double informationGain,
+                                   double publicInfluence, double roleObjective) {
+        target.put("campValue", campValue);
+        target.put("informationGain", informationGain);
+        target.put("publicInfluence", publicInfluence);
+        target.put("roleObjective", roleObjective);
     }
 
     private static List<StrategyModeDefinition> modeDefinitions(String role) {

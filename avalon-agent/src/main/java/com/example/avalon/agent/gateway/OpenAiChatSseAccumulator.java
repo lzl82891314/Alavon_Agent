@@ -50,7 +50,11 @@ final class OpenAiChatSseAccumulator {
         }
         JsonNode root = read(data);
         if (root.has("error")) {
-            throw new IllegalStateException("Model stream returned an error: " + root.path("error"));
+            JsonNode error = root.path("error");
+            String code = error.path("code").asText(null);
+            String message = error.path("message").asText(null);
+            String metadata = error.has("metadata") ? error.path("metadata").toString() : null;
+            throw new OpenAiChatSseErrorException(code, message, metadata, error.toString());
         }
         JsonNode choice = root.path("choices").path(0);
         if (choice.path("message").isObject()) {

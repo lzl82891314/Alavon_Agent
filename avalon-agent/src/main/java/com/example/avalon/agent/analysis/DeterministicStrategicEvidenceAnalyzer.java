@@ -1,6 +1,9 @@
 package com.example.avalon.agent.analysis;
 
 import com.example.avalon.agent.model.AgentTurnRequest;
+import com.example.avalon.core.player.memory.EvidenceAssessment;
+import com.example.avalon.core.player.memory.PossibleWorld;
+import com.example.avalon.core.player.memory.WorldConstraint;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -8,6 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.HashSet;
 
 /** Extracts bounded, public, sequence-addressable evidence without identity conclusions. */
 @Component
@@ -49,8 +54,211 @@ public final class DeterministicStrategicEvidenceAnalyzer {
         }
 
         List<Map<String, Object>> contradictions = contradictions(votes, claims);
+        List<WorldConstraint> constraints = worldConstraints(request, votes, teams, missions, claims, contradictions);
+        List<PossibleWorld> worlds = possibleWorlds(request, constraints, latestSequence);
+        List<EvidenceAssessment> assessments = evidenceAssessments(constraints, worlds, latestSequence);
         return new StrategicEvidenceContext(latestSequence, votes, teams, missions, contradictions,
-                teamCandidates(request, teams, missions));
+                teamCandidates(request, teams, missions), constraints, assessments, worlds);
+    }
+
+    private List<WorldConstraint> worldConstraints(AgentTurnRequest request,
+                                                   List<Map<String, Object>> votes,
+                                                   List<Map<String, Object>> teams,
+                                                   List<Map<String, Object>> missions,
+                                                   List<Map<String, Object>> claims,
+                                                   List<Map<String, Object>> contradictions) {
+        List<WorldConstraint> result = new ArrayList<>();
+        result.add(constraint("RULE_UNIQUENESS", "RULE_LEGALITY", List.of(), List.of(),
+                "Each public role-package role can be assigned to at most one player."));
+        privateVisibilityConstraints(request).forEach(result::add);
+        publicStatementConstraints(request).forEach(result::add);
+        teams.forEach(team -> result.add(constraint("TEAM-" + number(team.get("proposalSequence"), 0),
+                "PUBLIC_COMMITMENT", subjects(team.get("leader")), refs(team.get("proposalSequence")),
+                "The leader publicly proposed the listed team; this is an observable commitment, not an identity conclusion.")));
+        votes.forEach(vote -> result.add(constraint("VOTE-" + number(vote.get("revealSequence"), 0)
+                        + "-" + string(vote.get("voter")), "VOTE_OBSERVATION", subjects(vote.get("voter")),
+                refs(vote.get("revealSequence")), "A public team vote was revealed.")));
+        missions.forEach(mission -> {
+            boolean success = "SUCCESS".equals(mission.get("result"));
+            result.add(constraint("MISSION-" + number(mission.get("sequence"), 0),
+                    success ? "MISSION_SUCCESS_SET" : "MISSION_FAILURE_EXISTS", strings(mission.get("team")),
+                    refs(mission.get("sequence")), success
+                            ? "All submitted mission choices resolved as success; this does not prove the team has no evil player."
+                            : "At least one fail-capable participant was present; the fail source remains undisclosed."));
+        });
+        claims.forEach(claim -> result.add(constraint("CLAIM-" + number(claim.get("sequence"), 0)
+                        + "-" + string(claim.get("actorPlayerId")), "PUBLIC_COMMITMENT",
+                subjects(claim.get("actorPlayerId")), refs(claim.get("sequence")),
+                "A public statement expressed an observable voting position.")));
+        contradictions.forEach(item -> result.add(constraint("CONTRADICTION-" + number(item.get("sequence"), 0)
+                        + "-" + string(item.get("playerId")), "CLAIM_CONTRADICTION",
+                subjects(item.get("playerId")), refs(item.get("claimSequence"), item.get("sequence")),
+                "A public statement and a later revealed vote may require explanation; it is not an identity conclusion.")));
+        return List.copyOf(result);
+    }
+
+    private List<WorldConstraint> publicStatementConstraints(AgentTurnRequest request) {
+        if (request == null) return List.of();
+        List<WorldConstraint> result = new ArrayList<>();
+        for (Map<String, Object> event : observedEvents(request)) {
+            if (!"PLAYER_ACTION".equals(event.get("eventType"))) continue;
+            Map<String, Object> facts = map(event.get("facts"));
+            if (string(facts.get("speech")) == null) continue;
+            long sequence = sequence(event);
+            result.add(constraint("STATEMENT-" + sequence + "-" + string(event.get("actorPlayerId")),
+                    "PUBLIC_STATEMENT", subjects(event.get("actorPlayerId")), refs(sequence),
+                    "A public statement is available for later commitment and behavior comparison."));
+        }
+        return List.copyOf(result);
+    }
+
+    private List<WorldConstraint> privateVisibilityConstraints(AgentTurnRequest request) {
+        if (request == null) return List.of();
+        List<WorldConstraint> result = new ArrayList<>();
+        String ownRole = string(request.getRoleId());
+        if (ownRole != null) {
+            result.add(constraint("SELF-ROLE", "ROLE_VISIBILITY", subjects(request.getPlayerId()), List.of(),
+                    "The observing player knows their own role."));
+        }
+        Object values = request.getPrivateKnowledge().get("visiblePlayers");
+        if (!(values instanceof List<?> list)) return List.copyOf(result);
+        for (Object value : list) {
+            Map<String, Object> player = map(value);
+            String playerId = string(player.get("playerId"));
+            if (playerId == null) continue;
+            String exactRole = string(player.get("exactRoleId"));
+            List<String> candidates = strings(player.get("candidateRoleIds"));
+            if (exactRole != null || !candidates.isEmpty() || string(player.get("camp")) != null) {
+                result.add(constraint("PRIVATE-VISIBILITY-" + playerId, "ROLE_VISIBILITY", subjects(playerId), List.of(),
+                        "This constraint is derived only from the observing player's private visibility."));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private List<PossibleWorld> possibleWorlds(AgentTurnRequest request,
+                                               List<WorldConstraint> constraints,
+                                               long updatedAtSequence) {
+        if (request == null) return List.of();
+        List<String> players = players(request);
+        List<String> roles = strings(request.getPublicState().get("roleIds")).stream().sorted().toList();
+        Map<String, String> fixedAssignments = fixedAssignments(request);
+        Map<String, Set<String>> roleCandidates = roleCandidates(request);
+        if (players.isEmpty()) return List.of();
+        if (roles.size() != players.size() || new HashSet<>(roles).size() != roles.size()) {
+            return List.of(partialWorld(fixedAssignments, constraints, updatedAtSequence));
+        }
+        List<Map<String, String>> assignments = new ArrayList<>();
+        enumerateWorlds(players, roles, fixedAssignments, roleCandidates, 0, new LinkedHashMap<>(),
+                new HashSet<>(), assignments, worldLimit(players.size()));
+        if (assignments.isEmpty()) return List.of();
+        double weight = 1.0D / assignments.size();
+        List<PossibleWorld> worlds = new ArrayList<>();
+        for (int index = 0; index < assignments.size(); index++) {
+            worlds.add(new PossibleWorld("W" + (index + 1), assignments.get(index), constraints, weight, weight,
+                    List.of(), List.of(), List.of(), updatedAtSequence));
+        }
+        return List.copyOf(worlds);
+    }
+
+    private PossibleWorld partialWorld(Map<String, String> fixedAssignments,
+                                       List<WorldConstraint> constraints,
+                                       long updatedAtSequence) {
+        return new PossibleWorld("W-PARTIAL", fixedAssignments, constraints, 1.0D, 1.0D,
+                List.of(), List.of(), List.of(), updatedAtSequence);
+    }
+
+    private void enumerateWorlds(List<String> players, List<String> roles, Map<String, String> fixedAssignments,
+                                 Map<String, Set<String>> roleCandidates, int index, Map<String, String> current,
+                                 Set<String> usedRoles, List<Map<String, String>> result, int limit) {
+        if (result.size() >= limit) return;
+        if (index == players.size()) {
+            result.add(Map.copyOf(current));
+            return;
+        }
+        String player = players.get(index);
+        String fixedRole = fixedAssignments.get(player);
+        List<String> allowedRoles = fixedRole == null ? roles : List.of(fixedRole);
+        Set<String> candidateRoles = roleCandidates.getOrDefault(player, Set.of());
+        for (String role : allowedRoles) {
+            if (usedRoles.contains(role) || (!candidateRoles.isEmpty() && !candidateRoles.contains(role))) continue;
+            current.put(player, role);
+            usedRoles.add(role);
+            enumerateWorlds(players, roles, fixedAssignments, roleCandidates, index + 1, current, usedRoles, result, limit);
+            usedRoles.remove(role);
+            current.remove(player);
+            if (result.size() >= limit) return;
+        }
+    }
+
+    private int worldLimit(int playerCount) {
+        return Math.min(48, Math.max(8, playerCount * playerCount));
+    }
+
+    private Map<String, String> fixedAssignments(AgentTurnRequest request) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (string(request.getPlayerId()) != null && string(request.getRoleId()) != null) {
+            result.put(request.getPlayerId(), request.getRoleId());
+        }
+        visiblePlayers(request).forEach(player -> {
+            String playerId = string(player.get("playerId"));
+            String exactRole = string(player.get("exactRoleId"));
+            if (playerId != null && exactRole != null) result.put(playerId, exactRole);
+        });
+        return result;
+    }
+
+    private Map<String, Set<String>> roleCandidates(AgentTurnRequest request) {
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        visiblePlayers(request).forEach(player -> {
+            String playerId = string(player.get("playerId"));
+            List<String> candidates = strings(player.get("candidateRoleIds"));
+            if (playerId != null && !candidates.isEmpty()) result.put(playerId, Set.copyOf(candidates));
+        });
+        return result;
+    }
+
+    private List<Map<String, Object>> visiblePlayers(AgentTurnRequest request) {
+        Object values = request.getPrivateKnowledge().get("visiblePlayers");
+        if (!(values instanceof List<?> list)) return List.of();
+        return list.stream().map(this::map).toList();
+    }
+
+    private List<EvidenceAssessment> evidenceAssessments(List<WorldConstraint> constraints,
+                                                         List<PossibleWorld> worlds,
+                                                         long observedThroughSequence) {
+        if (worlds.isEmpty()) return List.of();
+        Map<String, Double> equalLikelihoods = worlds.stream().collect(java.util.stream.Collectors.toMap(
+                PossibleWorld::worldId, ignored -> 1.0D, (left, right) -> left, LinkedHashMap::new));
+        List<EvidenceAssessment> result = new ArrayList<>();
+        for (WorldConstraint constraint : constraints) {
+            for (Long reference : constraint.evidenceReferences()) {
+                result.add(new EvidenceAssessment(reference, constraint.kind(), equalLikelihoods,
+                        "The host records this visible evidence as a constraint without drawing an identity conclusion.",
+                        "Relative likelihood remains unassessed until a strategic evaluator supplies a behavior model.",
+                        observedThroughSequence));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private WorldConstraint constraint(String id, String kind, List<String> subjects,
+                                       List<Long> references, String explanation) {
+        return new WorldConstraint(id, kind, subjects, references, explanation);
+    }
+
+    private List<String> subjects(Object value) {
+        String subject = string(value);
+        return subject == null ? List.of() : List.of(subject);
+    }
+
+    private List<Long> refs(Object... values) {
+        List<Long> result = new ArrayList<>();
+        for (Object value : values) {
+            long sequence = number(value, 0);
+            if (sequence > 0) result.add(sequence);
+        }
+        return result.stream().distinct().toList();
     }
 
     private Map<String, Object> teamHistory(long sequence, Map<String, Object> event, List<String> team) {

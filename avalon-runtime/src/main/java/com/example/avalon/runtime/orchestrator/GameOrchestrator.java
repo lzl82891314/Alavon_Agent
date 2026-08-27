@@ -489,7 +489,8 @@ public class GameOrchestrator {
                 update.roleBeliefs(), strategyState, update.communicationPlan(), update.evidenceReferences(),
                 update.beliefEvidenceReferences(), update.observedThroughSequence(), update.strategyMode(), update.lastSummary(),
                 update.cognitionSectionStatuses(), update.cognitionDegraded(), update.acceptedCognitionSections(),
-                update.privateActionAssessment());
+                update.privateActionAssessment(), update.worldHypotheses(), update.activePredictions(),
+                update.evidenceAssessments(), update.actionAssessments());
     }
 
     private List<String> revisedCommitments(

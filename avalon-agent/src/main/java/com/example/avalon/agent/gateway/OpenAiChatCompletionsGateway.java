@@ -24,6 +24,7 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpenAiChatCompletionsGateway.class);
     private static final String GATEWAY_TYPE = "openai-compatible";
     private static final String DEFAULT_MODEL = "gpt-5.2";
+    private static final String JSON_OBJECT_MESSAGE_MARKER = "Return one valid json object.";
     private final OpenAiHttpTransport transport;
     private final ModelProfileApiKeyResolver apiKeyResolver;
     private final ModelStreamEventPublisher streamEvents;
@@ -148,7 +149,9 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
         ArrayNode messages = root.putArray("messages");
         messages.addObject()
                 .put("role", OpenAiCompatibleSupport.instructionRole(request.getProvider(), providerOptions))
-                .put("content", developerPrompt(request));
+                .put("content", developerPrompt(request)
+                        + (usesJsonObjectResponseFormat(providerOptions) ? System.lineSeparator()
+                        + JSON_OBJECT_MESSAGE_MARKER : ""));
         messages.addObject()
                 .put("role", "user")
                 .put("content", request.getPromptText());
@@ -314,6 +317,13 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
                             """.strip());
         }
         return builder.toString();
+    }
+
+    private boolean usesJsonObjectResponseFormat(Map<String, Object> providerOptions) {
+        Object format = providerOptions.get("response_format");
+        if (!(format instanceof Map<?, ?> values)) return false;
+        Object type = values.get("type");
+        return "json_object".equalsIgnoreCase(type == null ? null : String.valueOf(type));
     }
 
     private String textOrNull(JsonNode node) {

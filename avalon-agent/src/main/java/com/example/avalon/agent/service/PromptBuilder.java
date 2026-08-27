@@ -53,20 +53,27 @@ public final class PromptBuilder {
                 ## 决策要求
                 1. 先比较新事件与既有信念、承诺和叙事，识别支持证据、反证和矛盾。
                 2. 如果提供 memoryUpdate，roleBeliefs 中的值表示玩家属于邪恶阵营的概率，范围必须为 0 到 1。没有对应 beliefEvidenceReferences 时，单次相对既有值最多变化 0.05；有对应的、直接提及该玩家的可见证据时最多变化 0.25；首次出现的玩家以 0.5 为基线，最多变化 0.15。超过这些幅度必须拆分到后续回合，不能一次完成。
-                3. 如果提供 strategyState，请记录 mode、objective、unresolvedQuestions、publicCommitments、coverStory、deceptionIntent 和 consistencyRisks。MERLIN 还必须记录数值型 exposureRisk，范围为 0 到 1。
-                4. 如果提供 communicationPlan，请说明 speechAct、desiredAudienceBeliefs、evidenceToMention、evidenceToWithhold 和 publicMessage。
-                5. 公开表达必须服务于策略；不要复述规则、回合进度或泛泛地说“继续观察”。
-                6. 如果当前是 TARGETED_RESPONSES，必须回答讨论指令指定的质疑；如果是 LEADER_SYNTHESIS，必须综合争议后给出队伍判断。
-                7. 优先使用宿主提供的 voteEvidence、teamCandidates、missionConstraints 和 contradictionCandidates；至少比较两个可行队伍、投票或沟通方案，并说明选择依据。
-                8. 依据角色策略选择当前模式和风险档位；刺客从非刺杀阶段持续更新梅林候选，不要把刺杀只当作最终失败后的流程动作。
-                9. audiencePlan 和 highRiskRoleClaim 只是候选计划。高风险身份声明必须同时评估目标、预期反应、风险和退出叙事，不得因为存在候选就强制执行。
-                10. action.speechText、communicationPlan.publicMessage、publicSpeech 和 privateThought 必须使用简体中文，不得写英文句子；P1 之类的玩家编号和 JSON 契约规定的英文枚举不受此限制。
-                11. 不输出原始思维链。privateThought 只写一句简短的中文策略摘要；只输出下面的结构化决策产物和动作。
+                3. 如果提供 worldHypotheses，保留至少两个仍可区分的解释（当候选不止一个时），每个世界只使用可见约束和序号证据；不得因本轮动作选择而静默改写既有世界。
+                4. 如果提供 activePredictions，逐项保留原 predictionId，并只将其标为 SUPPORTED、CONTRADICTED、INCONCLUSIVE 或 EXPIRED；新预测必须绑定 worldId、后续公开观察点和有效序号窗口。
+                5. 如果提供 actionAssessments，至少比较两个合法候选，写明各世界结果、阵营价值、信息增益、暴露成本、承诺成本、执行风险、证据序号和后续观察点；以角色策略的 objectiveWeights 和 riskBudget 进行排序，不得把固定队伍或玩家写成规则。
+                6. 如果提供 strategyState，请记录 mode、objective、unresolvedQuestions、publicCommitments、coverStory、deceptionIntent 和 consistencyRisks。MERLIN 还必须记录数值型 exposureRisk，范围为 0 到 1。
+                7. 如果提供 communicationPlan，请说明 speechAct、desiredAudienceBeliefs、evidenceToMention、evidenceToWithhold 和 publicMessage，并记录所选关键受众、预期反应和仅基于公开事件的实际反馈。
+                8. 公开表达必须服务于策略；不要复述规则、回合进度或泛泛地说“继续观察”。
+                9. 如果当前是 TARGETED_RESPONSES，必须回答讨论指令指定的质疑；如果是 LEADER_SYNTHESIS，必须综合争议后给出队伍判断。
+                10. 若 audiencePlan 中提供 accusationResponsePlan，选择其一项候选回应策略：直接否认、证据反驳、局部承认、焦点转移或有理由沉默。回应必须引用指控序号、指出证据解释或替代解释；不得因被指控而默认身份结论成立。
+                11. 优先使用宿主提供的 voteEvidence、teamCandidates、missionConstraints 和 contradictionCandidates；至少比较两个可行队伍、投票或沟通方案，并说明选择依据。
+                12. 依据角色策略选择当前模式和风险档位；刺客从非刺杀阶段持续更新梅林候选，不要把刺杀只当作最终失败后的流程动作。
+                13. audiencePlan 和 highRiskRoleClaim 只是候选计划。高风险身份声明必须同时评估目标、预期反应、风险和退出叙事，不得因为存在候选就强制执行。
+                14. action.speechText、communicationPlan.publicMessage、publicSpeech 和 privateThought 必须使用简体中文，不得写英文句子；P1 之类的玩家编号和 JSON 契约规定的英文枚举不受此限制。
+                15. 不输出原始思维链。privateThought 只写一句简短的中文策略摘要；只输出下面的结构化决策产物和动作。
 
                 ## 输出契约
-                只返回一个 JSON 对象：
+                只返回一个 json 对象：
                 {
-                  "memoryUpdate": {
+                    "memoryUpdate": {
+                    "worldHypotheses": [{"worldId":"...","roleAssignments":{},"constraints":[],"priorWeight":0.0,"posteriorWeight":0.0,"supportingEvidenceReferences":[],"opposingEvidenceReferences":[],"predictions":[],"updatedAtSequence":0}],
+                    "activePredictions": [{"predictionId":"...","worldId":"...","subjectPlayerId":"...","situation":"...","expectedBehaviors":[],"discriminatingObservationReferences":[],"status":"PENDING or SUPPORTED or CONTRADICTED or INCONCLUSIVE or EXPIRED","validThroughSequence":0}],
+                    "actionAssessments": [{"candidateId":"...","actionType":"...","action":{},"worldOutcomes":{},"expectedCampValue":0.0,"expectedInformationGain":0.0,"exposureCost":0.0,"commitmentCost":0.0,"executionRisk":0.0,"evidenceReferences":[],"followUpObservationReferences":[]}],
                     "roleBeliefs": {"playerId": 0.0},
                     "evidenceReferences": [0],
                     "beliefEvidenceReferences": {"playerId": [0]},
@@ -84,6 +91,9 @@ public final class PromptBuilder {
                       "desiredAudienceBeliefs": {},
                       "evidenceToMention": [],
                       "evidenceToWithhold": [],
+                      "targetAudience": [],
+                      "expectedReactions": [],
+                      "observedAudienceFeedback": [],
                       "publicMessage": "..."
                     },
                     "strategyMode": "...",
@@ -109,7 +119,7 @@ public final class PromptBuilder {
             prompt += """
 
                     ## 当前阶段紧凑输出
-                    这是私密原子动作。最终 JSON 只包含 action；省略 memoryUpdate、publicSpeech、privateThought 和 auditReason。
+                    这是私密原子动作。最终 json 只包含 action；省略 memoryUpdate、publicSpeech、privateThought 和 auditReason。
                     """;
         }
         return prompt;

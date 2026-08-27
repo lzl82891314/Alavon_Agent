@@ -27,6 +27,9 @@ public final class RoleStrategyPlanner {
         policy.put("camp", context.privateView().camp().name());
         policy.put("situation", situation(context));
         policy.put("objectives", objectives(role, context));
+        policy.put("objectiveWeights", RoleStrategyPolicy.objectiveWeights(role));
+        policy.put("riskBudget", RoleStrategyPolicy.riskBudget(role, context.phase(),
+                missionCount(context, true), missionCount(context, false)));
         policy.put("constraints", constraints(role));
         policy.put("permittedDeceptionIntents", RoleStrategyPolicy.permittedDeceptionIntents(role));
         policy.put("allowedStrategyModes", RoleStrategyPolicy.strategyModes(role));
@@ -34,6 +37,7 @@ public final class RoleStrategyPlanner {
         policy.put("modeCandidates", modeCandidates);
         policy.put("decisionQuestions", decisionQuestions(role, context));
         policy.put("competingRoleHypotheses", competingRoleHypotheses(role, context));
+        policy.put("worldEvaluationGuidance", worldEvaluationGuidance(role, context));
         policy.put("behaviorPredictions", behaviorPredictions(role, context));
         policy.put("assassinationTracking", assassinationTracking(role, context));
         policy.put("existingCommitments", context.memoryState().commitments());
@@ -158,6 +162,28 @@ public final class RoleStrategyPlanner {
         return List.of(
                 roleHypothesis("PERCIVAL-H1", first.playerId(), "MERLIN", second.playerId(), "MORGANA"),
                 roleHypothesis("PERCIVAL-H2", first.playerId(), "MORGANA", second.playerId(), "MERLIN"));
+    }
+
+    private Map<String, Object> worldEvaluationGuidance(String role, PlayerTurnContext context) {
+        List<String> activeWorlds = context.memoryState().worldHypotheses().stream()
+                .map(world -> world.worldId())
+                .toList();
+        Map<String, Object> guidance = new LinkedHashMap<>();
+        guidance.put("persistedWorldIds", activeWorlds);
+        guidance.put("requiredComparisons", switch (role) {
+            case "PERCIVAL" -> List.of("keep both Merlin/Morgana assignments until public behavior distinguishes them",
+                    "compare protection value, bait risk, and mission value in each assignment");
+            case "MERLIN" -> List.of("compare mission protection against public-cover and assassination exposure",
+                    "do not turn private certainty into a public-world premise");
+            case "MORGANA" -> List.of("compare credibility, Percival misdirection, and mission pressure",
+                    "retain explanations that remain plausible in public evidence");
+            case "ASSASSIN" -> List.of("compare Merlin, Percival protection, and bait explanations for accurate guidance",
+                    "keep assassination candidates unresolved before a legal assassination action");
+            default -> List.of("compare camp value, information gain, exposure, and commitment cost across surviving worlds",
+                    "prefer actions with a public observation that can distinguish competing worlds");
+        });
+        guidance.put("predictionRequirement", "Every selected world must retain a future public observation that can support, contradict, or leave its prediction inconclusive.");
+        return guidance;
     }
 
     private Map<String, Object> roleHypothesis(String id,

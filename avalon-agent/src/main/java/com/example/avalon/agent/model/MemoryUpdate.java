@@ -1,5 +1,10 @@
 package com.example.avalon.agent.model;
 
+import com.example.avalon.core.player.memory.BehaviorPrediction;
+import com.example.avalon.core.player.memory.EvidenceAssessment;
+import com.example.avalon.core.player.memory.PossibleWorld;
+import com.example.avalon.core.player.memory.StrategicActionCandidate;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +26,10 @@ public class MemoryUpdate {
     private Long observedThroughSequence;
     private String strategyMode;
     private String lastSummary;
+    private List<PossibleWorld> worldHypotheses = new ArrayList<>();
+    private List<BehaviorPrediction> activePredictions = new ArrayList<>();
+    private List<EvidenceAssessment> evidenceAssessments = new ArrayList<>();
+    private List<StrategicActionCandidate> actionAssessments = new ArrayList<>();
 
     public Map<String, Double> getSuspicionDelta() {
         return suspicionDelta;
@@ -98,4 +107,13 @@ public class MemoryUpdate {
     public void setLastSummary(String lastSummary) {
         this.lastSummary = lastSummary;
     }
+
+    public List<PossibleWorld> getWorldHypotheses() { return worldHypotheses; }
+    public void setWorldHypotheses(List<PossibleWorld> value) { worldHypotheses = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public List<BehaviorPrediction> getActivePredictions() { return activePredictions; }
+    public void setActivePredictions(List<BehaviorPrediction> value) { activePredictions = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public List<EvidenceAssessment> getEvidenceAssessments() { return evidenceAssessments; }
+    public void setEvidenceAssessments(List<EvidenceAssessment> value) { evidenceAssessments = value == null ? new ArrayList<>() : new ArrayList<>(value); }
+    public List<StrategicActionCandidate> getActionAssessments() { return actionAssessments; }
+    public void setActionAssessments(List<StrategicActionCandidate> value) { actionAssessments = value == null ? new ArrayList<>() : new ArrayList<>(value); }
 }

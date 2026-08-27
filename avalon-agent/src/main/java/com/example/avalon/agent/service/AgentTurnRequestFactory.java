@@ -4,10 +4,12 @@ import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.ModelProfile;
 import com.example.avalon.agent.model.PlayerAgentConfig;
 import com.example.avalon.agent.analysis.DeterministicStrategicEvidenceAnalyzer;
+import com.example.avalon.agent.analysis.StrategicEvidenceContext;
 import com.example.avalon.agent.social.SocialInfluencePlanner;
 import com.example.avalon.core.game.model.PlayerTurnContext;
 import com.example.avalon.core.player.memory.VisiblePlayerInfo;
 import com.example.avalon.agent.strategy.RoleStrategyPlanner;
+import com.example.avalon.agent.strategy.StrategicActionEvaluator;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -22,14 +24,17 @@ public class AgentTurnRequestFactory {
     private final RoleStrategyPlanner roleStrategyPlanner;
     private final DeterministicStrategicEvidenceAnalyzer evidenceAnalyzer;
     private final SocialInfluencePlanner socialInfluencePlanner;
+    private final StrategicActionEvaluator strategicActionEvaluator;
     private final MemoryContextProjector memoryContextProjector;
 
     public AgentTurnRequestFactory(RoleStrategyPlanner roleStrategyPlanner,
                                    DeterministicStrategicEvidenceAnalyzer evidenceAnalyzer,
-                                   SocialInfluencePlanner socialInfluencePlanner) {
+                                   SocialInfluencePlanner socialInfluencePlanner,
+                                   StrategicActionEvaluator strategicActionEvaluator) {
         this.roleStrategyPlanner = roleStrategyPlanner;
         this.evidenceAnalyzer = evidenceAnalyzer;
         this.socialInfluencePlanner = socialInfluencePlanner;
+        this.strategicActionEvaluator = strategicActionEvaluator;
         this.memoryContextProjector = new MemoryContextProjector();
     }
 
@@ -61,7 +66,9 @@ public class AgentTurnRequestFactory {
                 new TypeReference<Map<String, Object>>() { }));
         request.setAllowedActions(context.allowedActions().allowedActionTypes().stream().map(Enum::name).toList());
         Map<String, Object> strategyContext = new LinkedHashMap<>(roleStrategyPlanner.plan(context, agentConfig));
-        strategyContext.putAll(evidenceAnalyzer.analyze(request).asMap());
+        StrategicEvidenceContext evidence = evidenceAnalyzer.analyze(request);
+        strategyContext.putAll(evidence.asMap());
+        strategyContext.putAll(strategicActionEvaluator.evaluate(request, evidence, context.memoryState().activePredictions()));
         strategyContext.put("audiencePlan", objectMapper.convertValue(socialInfluencePlanner.plan(request),
                 new TypeReference<Map<String, Object>>() { }));
         request.setStrategyContext(strategyContext);
@@ -109,6 +116,7 @@ public class AgentTurnRequestFactory {
         Map<String, Object> payload = objectMapper.convertValue(context.publicState(), new TypeReference<Map<String, Object>>() { });
         payload.put("teamSize", context.ruleSetDefinition().teamSizeForRound(context.roundNo()));
         payload.put("playerCount", context.setupTemplate().playerCount());
+        payload.put("roleIds", context.setupTemplate().roleIds());
         return payload;
     }
 

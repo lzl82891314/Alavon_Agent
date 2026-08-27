@@ -44,7 +44,8 @@ public class SocialInfluencePlanner {
                 .toList();
         List<Long> basis = events.stream().map(PublicEvent::sequence).toList();
         RoleClaimCandidate claim = claimCandidate(request, targets, basis, events);
-        return new SocialInfluencePlan(targets, basis, reactions, followUps, claim);
+        return new SocialInfluencePlan(targets, basis, reactions, followUps, claim,
+                accusationResponsePlan(request, events), observedAudienceFeedback(request, events));
     }
 
     private List<PublicEvent> publicEvents(List<Map<String, Object>> rawEvents) {
@@ -54,7 +55,9 @@ public class SocialInfluencePlanner {
             Long sequence = number(raw.get("sequence"));
             String actor = string(raw.get("actorPlayerId"));
             if (sequence != null && !actor.isBlank()) {
-                events.add(new PublicEvent(sequence, string(raw.get("eventType")), actor));
+                events.add(new PublicEvent(sequence, string(raw.get("eventType")), actor,
+                        strings(raw.get("mentions")), longs(raw.get("replyToEventSequences")),
+                        string(raw.get("speechAct"))));
             }
         }
         return events;
@@ -152,6 +155,52 @@ public class SocialInfluencePlanner {
                 0.7, basis);
     }
 
+    private AccusationResponsePlan accusationResponsePlan(AgentTurnRequest request, List<PublicEvent> events) {
+        List<PublicEvent> accusations = events.stream()
+                .filter(event -> !request.getPlayerId().equals(event.actorPlayerId()))
+                .filter(event -> event.mentions().contains(request.getPlayerId()))
+                .filter(event -> "CHALLENGE".equals(event.speechAct())
+                        || referencesDirective(request, event.sequence()))
+                .toList();
+        if (accusations.isEmpty()) return null;
+
+        PublicEvent latest = accusations.get(accusations.size() - 1);
+        List<Long> basis = List.of(latest.sequence());
+        return new AccusationResponsePlan(latest.actorPlayerId(), latest.sequence(),
+                List.of(
+                        responseOption("DIRECT_DENIAL", "明确否定不能由公开证据支持的结论，并给出替代解释", basis),
+                        responseOption("EVIDENCE_REBUTTAL", "逐项回应可见证据，说明其为何不足以唯一支持指控", basis),
+                        responseOption("LIMITED_CONCESSION", "只承认可验证的局部行为或表述，不承认未被事实支持的身份结论", basis),
+                        responseOption("FOCUS_REDIRECTION", "将讨论转向同一证据下可比较的队伍、投票或其他解释", basis),
+                        responseOption("REASONED_SILENCE", "仅在当前阶段不允许或没有新的公开回应空间时，说明暂不扩展争论的可验证理由", basis)),
+                List.of("指控者是否补充证据、修正结论或改变投票", "关键受众是否接受替代解释并调整公开立场"));
+    }
+
+    private AudienceFeedback observedAudienceFeedback(AgentTurnRequest request, List<PublicEvent> events) {
+        Object previous = request.getMemory().get("communicationPlan");
+        if (!(previous instanceof Map<?, ?> plan)) return AudienceFeedback.empty();
+        List<String> intended = strings(plan.get("targetAudience"));
+        if (intended.isEmpty()) intended = strings(plan.get("desiredAudienceBeliefs"));
+        if (intended.isEmpty()) return AudienceFeedback.empty();
+        List<String> audience = List.copyOf(intended);
+        List<PublicEvent> reactions = events.stream()
+                .filter(event -> audience.contains(event.actorPlayerId()))
+                .filter(event -> !event.replyToEventSequences().isEmpty())
+                .toList();
+        return new AudienceFeedback(audience, reactions.stream().map(PublicEvent::sequence).toList(),
+                reactions.isEmpty() ? "NO_OBSERVABLE_REACTION" : "PUBLIC_REACTION_OBSERVED",
+                "仅记录公开回复和后续公开立场；不从沉默推断私有身份。");
+    }
+
+    private boolean referencesDirective(AgentTurnRequest request, long sequence) {
+        Object reply = request.getDiscussionDirective().get("replyToEventSequence");
+        return reply instanceof Number number && number.longValue() == sequence;
+    }
+
+    private ResponseOption responseOption(String strategy, String purpose, List<Long> evidence) {
+        return new ResponseOption(strategy, purpose, evidence);
+    }
+
     private static String string(Object value) {
         return value == null ? "" : String.valueOf(value);
     }
@@ -164,7 +213,19 @@ public class SocialInfluencePlanner {
         return value instanceof Number number ? number.intValue() : null;
     }
 
-    private record PublicEvent(long sequence, String eventType, String actorPlayerId) { }
+    private static List<String> strings(Object value) {
+        if (!(value instanceof List<?> values)) return List.of();
+        return values.stream().filter(java.util.Objects::nonNull).map(String::valueOf).toList();
+    }
+
+    private static List<Long> longs(Object value) {
+        if (!(value instanceof List<?> values)) return List.of();
+        return values.stream().filter(Number.class::isInstance).map(Number.class::cast)
+                .map(Number::longValue).toList();
+    }
+
+    private record PublicEvent(long sequence, String eventType, String actorPlayerId, List<String> mentions,
+                               List<Long> replyToEventSequences, String speechAct) { }
 
     private record PlayerProfile(String playerId, Integer seatNo) { }
 
@@ -194,7 +255,9 @@ public class SocialInfluencePlanner {
     public record SocialInfluencePlan(List<AudienceTarget> targetAudiences, List<Long> publicBasisSequences,
                                       List<ExpectedReaction> expectedReactions,
                                       List<String> followUpObservationPoints,
-                                      RoleClaimCandidate highRiskRoleClaim) {
+                                      RoleClaimCandidate highRiskRoleClaim,
+                                      AccusationResponsePlan accusationResponsePlan,
+                                      AudienceFeedback observedAudienceFeedback) {
         public SocialInfluencePlan {
             targetAudiences = targetAudiences == null ? List.of() : List.copyOf(targetAudiences);
             publicBasisSequences = publicBasisSequences == null ? List.of() : List.copyOf(publicBasisSequences);
@@ -203,7 +266,35 @@ public class SocialInfluencePlanner {
         }
 
         public static SocialInfluencePlan empty() {
-            return new SocialInfluencePlan(List.of(), List.of(), List.of(), List.of(), null);
+            return new SocialInfluencePlan(List.of(), List.of(), List.of(), List.of(), null, null, AudienceFeedback.empty());
+        }
+    }
+
+    public record ResponseOption(String strategy, String purpose, List<Long> publicBasis) {
+        public ResponseOption {
+            publicBasis = publicBasis == null ? List.of() : List.copyOf(publicBasis);
+        }
+    }
+
+    public record AccusationResponsePlan(String accuser, long accusationSequence,
+                                         List<ResponseOption> responseOptions,
+                                         List<String> followUpObservations) {
+        public AccusationResponsePlan {
+            responseOptions = responseOptions == null ? List.of() : List.copyOf(responseOptions);
+            followUpObservations = followUpObservations == null ? List.of() : List.copyOf(followUpObservations);
+        }
+    }
+
+    public record AudienceFeedback(List<String> intendedAudience, List<Long> observedReactionSequences,
+                                   String status, String interpretationBoundary) {
+        public AudienceFeedback {
+            intendedAudience = intendedAudience == null ? List.of() : List.copyOf(intendedAudience);
+            observedReactionSequences = observedReactionSequences == null ? List.of() : List.copyOf(observedReactionSequences);
+        }
+
+        public static AudienceFeedback empty() {
+            return new AudienceFeedback(List.of(), List.of(), "NOT_APPLICABLE",
+                    "没有已持久化的公开受众计划可供反馈。");
         }
     }
 }

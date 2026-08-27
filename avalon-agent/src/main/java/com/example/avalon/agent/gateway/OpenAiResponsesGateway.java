@@ -16,6 +16,7 @@ import java.util.Map;
 /** Adapter for the OpenAI Responses API; domain code remains dependent only on AgentGateway. */
 @Component
 public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
+    private static final String JSON_OBJECT_MESSAGE_MARKER = "Return one valid json object.";
     private final OpenAiHttpTransport transport;
     private final ModelProfileApiKeyResolver apiKeys;
     private final ModelStreamEventPublisher streamEvents;
@@ -94,7 +95,8 @@ public final class OpenAiResponsesGateway implements ModelProtocolAdapter {
     private String body(AgentTurnRequest r) {
         ObjectNode root = json.createObjectNode();
         root.put("model", r.getModelName() == null || r.getModelName().isBlank() ? "gpt-5.2" : r.getModelName());
-        root.put("instructions", "你负责控制一名阿瓦隆玩家。公开发言和 privateThought 必须使用简体中文；只返回一个 JSON 对象，不要输出原始思维链。");
+        root.put("instructions", "你负责控制一名阿瓦隆玩家。公开发言和 privateThought 必须使用简体中文；只返回一个 JSON 对象，不要输出原始思维链。\n"
+                + JSON_OBJECT_MESSAGE_MARKER);
         root.put("input", r.getPromptText());
         root.put("store", false);
         root.put("stream", true);

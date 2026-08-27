@@ -33,6 +33,10 @@ public record PlayerMemoryState(
         boolean cognitionDegraded,
         List<String> acceptedCognitionSections,
         Map<String, Object> privateActionAssessment,
+        List<PossibleWorld> worldHypotheses,
+        List<BehaviorPrediction> activePredictions,
+        List<EvidenceAssessment> evidenceAssessments,
+        List<StrategicActionCandidate> actionAssessments,
         Instant updatedAt
 ) {
 
@@ -62,7 +66,43 @@ public record PlayerMemoryState(
         this(gameId, playerId, version, roleId, camp, suspicionScores, trustScores, observations,
                 commitments, inferredFacts, worldFacts, publicClaims, roleBeliefs, strategyState,
                 communicationPlan, beliefEvidenceReferences, lastObservedSequence, agentInstanceId,
-                strategyMode, lastSummary, Map.of(), false, List.of(), Map.of(), updatedAt);
+                strategyMode, lastSummary, Map.of(), false, List.of(), Map.of(), List.of(), List.of(), List.of(),
+                List.of(), updatedAt);
+    }
+
+    public PlayerMemoryState(
+            String gameId,
+            String playerId,
+            Long version,
+            String roleId,
+            Camp camp,
+            Map<String, Double> suspicionScores,
+            Map<String, Double> trustScores,
+            List<String> observations,
+            List<String> commitments,
+            List<String> inferredFacts,
+            List<Map<String, Object>> worldFacts,
+            List<Map<String, Object>> publicClaims,
+            Map<String, Double> roleBeliefs,
+            Map<String, Object> strategyState,
+            Map<String, Object> communicationPlan,
+            Map<String, List<Long>> beliefEvidenceReferences,
+            Long lastObservedSequence,
+            String agentInstanceId,
+            String strategyMode,
+            String lastSummary,
+            Map<String, Map<String, Object>> cognitionSectionStatuses,
+            boolean cognitionDegraded,
+            List<String> acceptedCognitionSections,
+            Map<String, Object> privateActionAssessment,
+            Instant updatedAt
+    ) {
+        this(gameId, playerId, version, roleId, camp, suspicionScores, trustScores, observations,
+                commitments, inferredFacts, worldFacts, publicClaims, roleBeliefs, strategyState,
+                communicationPlan, beliefEvidenceReferences, lastObservedSequence, agentInstanceId,
+                strategyMode, lastSummary, cognitionSectionStatuses, cognitionDegraded,
+                acceptedCognitionSections, privateActionAssessment, List.of(), List.of(), List.of(), List.of(),
+                updatedAt);
     }
 
     public PlayerMemoryState {
@@ -80,6 +120,10 @@ public record PlayerMemoryState(
         cognitionSectionStatuses = copySectionStatuses(cognitionSectionStatuses);
         acceptedCognitionSections = acceptedCognitionSections == null ? List.of() : List.copyOf(acceptedCognitionSections);
         privateActionAssessment = privateActionAssessment == null ? Map.of() : Map.copyOf(privateActionAssessment);
+        worldHypotheses = worldHypotheses == null ? List.of() : List.copyOf(worldHypotheses);
+        activePredictions = activePredictions == null ? List.of() : List.copyOf(activePredictions);
+        evidenceAssessments = evidenceAssessments == null ? List.of() : List.copyOf(evidenceAssessments);
+        actionAssessments = actionAssessments == null ? List.of() : List.copyOf(actionAssessments);
     }
 
     public static PlayerMemoryState empty(String gameId, String playerId, String roleId, Camp camp, Instant now) {
@@ -108,6 +152,10 @@ public record PlayerMemoryState(
                 false,
                 List.of(),
                 Map.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
                 now
         );
     }
@@ -149,9 +197,13 @@ public record PlayerMemoryState(
                 update.strategyMode() == null ? strategyMode : update.strategyMode(),
                 update.lastSummary() == null ? lastSummary : truncate(update.lastSummary(), 2000),
                 update.cognitionSectionStatuses().isEmpty() ? cognitionSectionStatuses : update.cognitionSectionStatuses(),
-                update.cognitionDegraded(),
+                cognitionDegraded || update.cognitionDegraded(),
                 update.acceptedCognitionSections().isEmpty() ? acceptedCognitionSections : update.acceptedCognitionSections(),
                 update.privateActionAssessment().isEmpty() ? privateActionAssessment : update.privateActionAssessment(),
+                update.worldHypotheses().isEmpty() ? worldHypotheses : update.worldHypotheses(),
+                update.activePredictions().isEmpty() ? activePredictions : update.activePredictions(),
+                update.evidenceAssessments().isEmpty() ? evidenceAssessments : update.evidenceAssessments(),
+                update.actionAssessments().isEmpty() ? actionAssessments : update.actionAssessments(),
                 now
         );
     }

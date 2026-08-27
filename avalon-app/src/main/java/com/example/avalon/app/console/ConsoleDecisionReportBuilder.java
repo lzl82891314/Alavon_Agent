@@ -322,7 +322,13 @@ public class ConsoleDecisionReportBuilder {
         appendProjection(parts, "行动前正式模式", firstValue(memory, "strategyMode", "currentMode"));
         appendProjection(parts, "行动前正式策略", firstValue(memory, "strategyState", "minimumStrategicState"));
         appendProjection(parts, "行动前正式假设", firstValue(memory,
-                "leadingHypotheses", "roleHypotheses", "hypotheses"));
+                "worldHypotheses", "leadingHypotheses", "roleHypotheses", "hypotheses"));
+        appendProjection(parts, "行动前正式预测", firstValue(memory,
+                "activePredictions", "behaviorPredictions", "predictions"));
+        appendProjection(parts, "行动前正式证据评估", firstValue(memory,
+                "evidenceAssessments", "evidenceAssessment"));
+        appendProjection(parts, "行动前正式候选评估", firstValue(memory,
+                "actionAssessments", "strategicActionCandidates", "candidateActions"));
         appendProjection(parts, "行动前正式受众", firstValue(memory,
                 "audienceBeliefUpdate", "audienceBeliefs", "audiencePlan", "communicationPlan"));
         appendProjection(parts, "行动前正式刺杀候选", firstValue(memory,
@@ -352,11 +358,14 @@ public class ConsoleDecisionReportBuilder {
                 case "memoryNotes" -> copyKeys(update, accepted, "suspicionDelta", "trustDelta",
                         "observationsToAdd", "commitmentsToAdd", "inferredFactsToAdd");
                 case "evidenceAssessments" -> copyKeys(update, accepted, "evidenceReferences",
-                        "beliefEvidenceReferences");
+                        "beliefEvidenceReferences", "evidenceAssessments");
                 case "beliefUpdate" -> copyKeys(update, accepted, "roleBeliefs", "beliefEvidenceReferences");
                 case "strategyState" -> copyKeys(update, accepted, "strategyState", "strategyMode", "lastSummary");
                 case "communicationPlan" -> copyKeys(update, accepted, "communicationPlan");
                 case "privateActionAssessment" -> copyKeys(update, accepted, "privateActionAssessment");
+                case "worldHypotheses" -> copyKeys(update, accepted, "worldHypotheses");
+                case "predictions", "activePredictions" -> copyKeys(update, accepted, "activePredictions");
+                case "actionAssessments" -> copyKeys(update, accepted, "actionAssessments");
                 default -> { }
             }
         }
@@ -389,7 +398,11 @@ public class ConsoleDecisionReportBuilder {
         appendProjection(parts, "矛盾", firstValue(strategyContext,
                 "detectedContradictions", "contradictions"));
         appendProjection(parts, "宿主假设", firstValue(strategyContext,
-                "roleHypotheses", "hypotheses", "leadingHypotheses"));
+                "worldHypotheses", "roleHypotheses", "hypotheses", "leadingHypotheses"));
+        appendProjection(parts, "预测与反馈", firstValue(strategyContext,
+                "activePredictions", "behaviorPredictions", "predictionFeedback"));
+        appendProjection(parts, "候选行动评估", firstValue(strategyContext,
+                "actionAssessments", "strategicActionCandidates", "candidateActions"));
         appendProjection(parts, "策略模式", firstValue(strategyContext,
                 "strategyMode", "currentMode", "mode"));
         appendProjection(parts, "受众计划", firstValue(strategyContext,

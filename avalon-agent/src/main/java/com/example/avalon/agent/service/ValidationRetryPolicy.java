@@ -9,6 +9,7 @@ import com.example.avalon.agent.model.MemoryUpdate;
 import com.example.avalon.agent.strategy.RoleStrategyPolicy;
 import com.example.avalon.core.game.model.PlayerAction;
 import com.example.avalon.core.game.model.PlayerTurnContext;
+import com.example.avalon.core.player.memory.BehaviorPrediction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -107,6 +108,7 @@ public class ValidationRetryPolicy {
         }
         validateMemoryNotes(context, result);
         validateEvidenceAssessments(context, result);
+        validateStrategicCognition(context, result);
         validateBeliefUpdate(context, result);
         validateStrategyState(context, result);
         validateCommunicationPlan(context, result, action);
@@ -128,6 +130,107 @@ public class ValidationRetryPolicy {
             discardCognitionSection(context, result, "evidenceAssessments",
                     "memoryUpdate.evidenceReferences", exception);
         }
+    }
+
+    private void validateStrategicCognition(PlayerTurnContext context, AgentTurnResult result) {
+        MemoryUpdate update = result.getMemoryUpdate();
+        validateStrategicSection(context, result, "worldHypotheses", "memoryUpdate.worldHypotheses", () -> {
+            validateReferences(context, update.getWorldHypotheses().stream()
+                    .flatMap(world -> java.util.stream.Stream.concat(world.supportingEvidenceReferences().stream(),
+                            world.opposingEvidenceReferences().stream())).toList());
+            update.getWorldHypotheses().forEach(world -> {
+                requireFiniteWeight(world.priorWeight(), "world priorWeight");
+                requireFiniteWeight(world.posteriorWeight(), "world posteriorWeight");
+            });
+        }, () -> update.setWorldHypotheses(List.of()));
+        validateStrategicSection(context, result, "predictions", "memoryUpdate.activePredictions", () -> {
+            validateReferences(context, update.getActivePredictions().stream()
+                    .flatMap(prediction -> prediction.discriminatingObservationReferences().stream()).toList());
+            update.getActivePredictions().forEach(prediction -> {
+                if (!List.of("PENDING", "SUPPORTED", "CONTRADICTED", "INCONCLUSIVE", "EXPIRED").contains(prediction.status())) {
+                    throw new IllegalStateException("Invalid prediction status: " + prediction.status());
+                }
+            });
+            validatePredictionLifecycle(context, update.getActivePredictions());
+        }, () -> update.setActivePredictions(List.of()));
+        validateStrategicSection(context, result, "evidenceAssessments", "memoryUpdate.evidenceAssessments", () -> {
+            validateReferences(context, update.getEvidenceAssessments().stream()
+                    .map(com.example.avalon.core.player.memory.EvidenceAssessment::evidenceSequence).toList());
+        }, () -> update.setEvidenceAssessments(List.of()));
+        validateStrategicSection(context, result, "actionAssessments", "memoryUpdate.actionAssessments", () -> {
+            validateReferences(context, update.getActionAssessments().stream()
+                    .flatMap(candidate -> candidate.evidenceReferences().stream()).toList());
+        }, () -> update.setActionAssessments(List.of()));
+    }
+
+    private void validateStrategicSection(PlayerTurnContext context, AgentTurnResult result,
+                                          String section, String field, Runnable validator, Runnable discard) {
+        try {
+            validator.run();
+            recordSectionAccepted(result, section, field);
+        } catch (RuntimeException exception) {
+            discard.run();
+            discardCognitionSection(context, result, section, field, exception);
+        }
+    }
+
+    private void validateReferences(PlayerTurnContext context, List<Long> references) {
+        if (references.stream().anyMatch(reference -> reference == null || reference <= 0)) {
+            throw new IllegalStateException("Strategic cognition contains an invalid evidence sequence");
+        }
+        validateVisibleEvidence(context, references);
+    }
+
+    private void requireFiniteWeight(double value, String field) {
+        if (!Double.isFinite(value) || value < 0.0d || value > 1.0d) {
+            throw new IllegalStateException(field + " must be between 0 and 1");
+        }
+    }
+
+    private void validatePredictionLifecycle(PlayerTurnContext context, List<BehaviorPrediction> updates) {
+        Map<String, BehaviorPrediction> previous = predictionIndex(context.memoryState().activePredictions(), "persisted");
+        Map<String, BehaviorPrediction> submitted = predictionIndex(updates, "submitted");
+        for (Map.Entry<String, BehaviorPrediction> entry : previous.entrySet()) {
+            BehaviorPrediction prior = entry.getValue();
+            BehaviorPrediction next = submitted.get(entry.getKey());
+            if (next == null) {
+                if ("PENDING".equals(prior.status())
+                        && prior.validThroughSequence() >= context.observations().toSequenceInclusive()) {
+                    throw new IllegalStateException("Active pending prediction cannot disappear: " + entry.getKey());
+                }
+                continue;
+            }
+            if (!samePredictionDefinition(prior, next)) {
+                throw new IllegalStateException("Prediction definition cannot be replaced: " + entry.getKey());
+            }
+            if (isTerminalPredictionStatus(prior.status()) && "PENDING".equals(next.status())) {
+                throw new IllegalStateException("Terminal prediction cannot return to PENDING: " + entry.getKey());
+            }
+        }
+    }
+
+    private Map<String, BehaviorPrediction> predictionIndex(List<BehaviorPrediction> predictions, String source) {
+        Map<String, BehaviorPrediction> result = new LinkedHashMap<>();
+        for (BehaviorPrediction prediction : predictions) {
+            String id = prediction.predictionId();
+            if (id == null || id.isBlank() || result.putIfAbsent(id, prediction) != null) {
+                throw new IllegalStateException("Prediction id must be unique and non-blank in " + source + " data");
+            }
+        }
+        return result;
+    }
+
+    private boolean samePredictionDefinition(BehaviorPrediction prior, BehaviorPrediction next) {
+        return java.util.Objects.equals(prior.worldId(), next.worldId())
+                && java.util.Objects.equals(prior.subjectPlayerId(), next.subjectPlayerId())
+                && java.util.Objects.equals(prior.situation(), next.situation())
+                && java.util.Objects.equals(prior.expectedBehaviors(), next.expectedBehaviors())
+                && java.util.Objects.equals(prior.discriminatingObservationReferences(), next.discriminatingObservationReferences())
+                && prior.validThroughSequence() == next.validThroughSequence();
+    }
+
+    private boolean isTerminalPredictionStatus(String status) {
+        return List.of("SUPPORTED", "CONTRADICTED", "EXPIRED").contains(status);
     }
 
     private void validateBeliefUpdate(PlayerTurnContext context, AgentTurnResult result) {
@@ -473,7 +576,14 @@ public class ValidationRetryPolicy {
         }
         String failureDomain = stringValue(responseException.diagnostics().get("failureDomain"));
         String failureKind = stringValue(responseException.diagnostics().get("failureKind"));
+        String message = failure.getMessage() == null ? "" : failure.getMessage();
+        if (isJsonResponseFormatPrerequisite(message)) {
+            return true;
+        }
         if ("stream_interrupted".equalsIgnoreCase(failureKind)) {
+            return true;
+        }
+        if ("provider_unavailable".equalsIgnoreCase(failureKind)) {
             return true;
         }
         if ("transport".equalsIgnoreCase(failureDomain)) {
@@ -481,7 +591,6 @@ public class ValidationRetryPolicy {
         }
         String finishReason = stringValue(responseException.diagnostics().get("finishReason"));
         String contentShape = stringValue(responseException.diagnostics().get("assistantContentShape"));
-        String message = failure.getMessage() == null ? "" : failure.getMessage();
         return requiresCompressionRetry(finishReason, contentShape, message);
     }
 
@@ -533,6 +642,20 @@ public class ValidationRetryPolicy {
         String finishReason = stringValue(responseException.diagnostics().get("finishReason"));
         String contentShape = stringValue(responseException.diagnostics().get("assistantContentShape"));
         String message = failure.getMessage() == null ? "" : failure.getMessage();
+        if (isJsonResponseFormatPrerequisite(message)) {
+            return "上游要求启用 response_format 时消息必须明确包含小写 json。"
+                    + "重新生成时只返回一个合法 json 对象；" + actionRequirement(allowedActions) + "。";
+        }
+        if ("stream_interrupted".equalsIgnoreCase(
+                stringValue(responseException.diagnostics().get("failureKind")))) {
+            return "上游响应流中断。请重新完整生成本次 action，只返回一个合法 json 对象；"
+                    + actionRequirement(allowedActions) + "。";
+        }
+        if ("provider_unavailable".equalsIgnoreCase(
+                stringValue(responseException.diagnostics().get("failureKind")))) {
+            return "上游服务暂时不可用。请重新完整生成本次 action，只返回一个合法 json 对象；"
+                    + actionRequirement(allowedActions) + "。";
+        }
         if (requiresCompressionRetry(finishReason, contentShape, message)) {
             return """
                     上一轮输出没有满足结构化要求。请压缩措辞后重新生成完整战略 JSON：
@@ -615,6 +738,15 @@ public class ValidationRetryPolicy {
                  "missing_content" -> true;
             default -> message.contains("did not include an action object");
         };
+    }
+
+    private boolean isJsonResponseFormatPrerequisite(String message) {
+        String normalized = message == null ? "" : message.toLowerCase(Locale.ROOT);
+        return normalized.contains("response_format") && normalized.contains("json")
+                && (normalized.contains("message") || normalized.contains("prompt") || normalized.contains("context"))
+                && (normalized.contains("must contain") || normalized.contains("must include")
+                || normalized.contains("must mention") || normalized.contains("word 'json'")
+                || normalized.contains("word \"json\""));
     }
 
     private String actionRequirement(List<String> allowedActions) {

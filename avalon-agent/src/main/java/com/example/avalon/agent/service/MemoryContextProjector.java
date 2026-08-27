@@ -31,6 +31,10 @@ public final class MemoryContextProjector {
         result.put("beliefEvidenceReferences", memory.beliefEvidenceReferences());
         result.put("strategyState", compact(memory.strategyState(), 0));
         result.put("communicationPlan", compact(memory.communicationPlan(), 0));
+        result.put("worldHypotheses", compact(memory.worldHypotheses(), 0));
+        result.put("activePredictions", compact(memory.activePredictions(), 0));
+        result.put("evidenceAssessments", compact(memory.evidenceAssessments(), 0));
+        result.put("actionAssessments", compact(memory.actionAssessments(), 0));
         result.put("commitments", tail(memory.commitments(), 20));
         result.put("observations", tail(memory.observations(), 20));
         result.put("inferredFacts", tail(memory.inferredFacts(), 20));
