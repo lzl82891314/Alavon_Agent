@@ -751,7 +751,9 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         if (!playbackSettings.enabled()) {
             return;
         }
-        System.out.println(printer.formatTurnLeadIn(state, session));
+        synchronized (ConsoleModelStreamReporter.outputLock()) {
+            System.out.println(printer.formatTurnLeadIn(state, session));
+        }
     }
 
     private void resetModelStreamActionStarts() {
@@ -866,10 +868,9 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                         System.out.printf(">>> [%d-%d] 中间事件属于私有信息，已按可见性策略隐藏%n",
                                 previous + 1, event.getSeqNo() - 1);
                     }
-                    ConsoleModelStreamReporter reporter = modelStreamReporter.getIfAvailable();
-                    boolean liveStream = reporter != null
-                            && reporter.hasStreamed(session.gameId(), event.getActorId());
-                    System.out.println(printer.formatEvent(event, session, liveStream));
+                    synchronized (ConsoleModelStreamReporter.outputLock()) {
+                        System.out.println(printer.formatEvent(event, session, false));
+                    }
                     session.updateLastPrintedEventSeqNo(event.getSeqNo());
                 });
     }
@@ -880,17 +881,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         auditEntries.stream()
                 .filter(entry -> entry.getEventSeqNo() != null && entry.getEventSeqNo() > session.lastPrintedAuditEventSeqNo())
                 .forEach(entry -> {
-                    ConsoleModelStreamReporter reporter = modelStreamReporter.getIfAvailable();
-                    boolean liveStream = reporter != null
-                            && reporter.hasStreamed(session.gameId(), entry.getPlayerId());
-                    boolean renderedOutput = reporter != null
-                            && reporter.hasRenderedOutput(session.gameId(), entry.getPlayerId());
-                    if (liveStream && renderedOutput && session.isLlmPlayer(entry.getPlayerId())) {
-                        String toolFlow = printer.formatToolCallFlow(entry, session);
-                        if (toolFlow != null) {
-                            System.out.println(toolFlow);
-                        }
-                    } else {
+                    synchronized (ConsoleModelStreamReporter.outputLock()) {
                         System.out.println(printer.formatInlineThought(entry, session, session.logLevel()));
                     }
                     session.updateLastPrintedAuditEventSeqNo(entry.getEventSeqNo());

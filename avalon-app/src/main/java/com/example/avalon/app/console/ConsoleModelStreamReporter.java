@@ -19,12 +19,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ConsoleModelStreamReporter implements ModelStreamEventListener {
     private static final String PUBLIC_SPEECH_MARKER = "\"publicSpeech\":\"";
     private static final String PRIVATE_THOUGHT_MARKER = "\"privateThought\":\"";
-    private final Object outputLock = new Object();
+    /** Shared lock for all live console output, including the game runner thread. */
+    private static final Object OUTPUT_LOCK = new Object();
     private final Map<String, StreamState> streams = new ConcurrentHashMap<>();
     private final Set<String> streamedAgents = ConcurrentHashMap.newKeySet();
     private final Set<String> renderedAgents = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> requestCounts = new ConcurrentHashMap<>();
     private volatile ConsoleLogLevel logLevel = ConsoleLogLevel.INFO;
+
+    public static Object outputLock() {
+        return OUTPUT_LOCK;
+    }
 
     public void setLogLevel(ConsoleLogLevel logLevel) {
         this.logLevel = logLevel == null ? ConsoleLogLevel.INFO : logLevel;
@@ -46,23 +51,8 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
 
     @Override
     public void onModelStreamEvent(ModelStreamEvent event) {
-        if (event == null || event.callId() == null) {
-            return;
-        }
-        synchronized (outputLock) {
-            switch (event.type()) {
-                case STARTED -> start(event);
-                case REASONING_DELTA -> reasoning(event);
-                case CONTENT_DELTA -> content(event);
-                case TOOL_CALL_ARGUMENT_DELTA -> toolArguments(event);
-                case TOOL_CALL_COMPLETE -> toolComplete(event);
-                case USAGE -> {
-                    // Usage is retained for metrics and intentionally omitted from the live console.
-                }
-                case COMPLETED -> complete(event, true);
-                case FAILED -> complete(event, false);
-            }
-        }
+        // The game console is a completed-action transcript. Model stream events are
+        // retained by the logging pipeline, but must not race the game transcript.
     }
 
     private void start(ModelStreamEvent event) {
@@ -72,11 +62,11 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
         int requestNo = requestCounts.merge(agentKey, 1, Integer::sum);
         if (logLevel == ConsoleLogLevel.INFO) {
             if (requestNo == 1) {
-                System.out.printf(">>> 玩家行动开始 | 阶段=%s | 行动者=%s%n",
-                        label(event.phase()), label(event.playerId()));
+                System.out.printf(">>> 玩家行动开始 | 阶段=%s | 行动者=%s | 模型=%s | 角色=%s%n",
+                        phaseLabel(event.phase()), label(event.playerId()), modelLabel(event), roleLabel(event.roleId()));
             } else {
-                System.out.printf(">>> Agent Loop 第%d次模型请求 | 阶段=%s | 行动者=%s%n",
-                        requestNo, label(event.phase()), label(event.playerId()));
+                System.out.printf(">>> Agent Loop 第%d次模型请求 | 阶段=%s | 行动者=%s | 模型=%s | 角色=%s%n",
+                        requestNo, phaseLabel(event.phase()), label(event.playerId()), modelLabel(event), roleLabel(event.roleId()));
             }
         } else if (logLevel != ConsoleLogLevel.INFO) {
             System.out.printf(">>> [模型流] %s | %s | 已连接，等待推理分片%n",
@@ -182,6 +172,41 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
 
     private String label(String value) {
         return value == null || value.isBlank() ? "未知" : value;
+    }
+
+    private String modelLabel(ModelStreamEvent event) {
+        if (event.modelName() != null && !event.modelName().isBlank()) {
+            return event.modelName();
+        }
+        return label(event.modelId());
+    }
+
+    private String roleLabel(String roleId) {
+        if (roleId == null || roleId.isBlank()) {
+            return "未知";
+        }
+        return switch (roleId) {
+            case "MERLIN" -> "梅林";
+            case "PERCIVAL" -> "派西维尔";
+            case "LOYAL_SERVANT" -> "忠臣";
+            case "MORGANA" -> "莫甘娜";
+            case "ASSASSIN" -> "刺客";
+            default -> roleId;
+        };
+    }
+
+    private String phaseLabel(String phase) {
+        if (phase == null || phase.isBlank()) {
+            return "未知";
+        }
+        return switch (phase) {
+            case "DISCUSSION" -> "公开讨论";
+            case "TEAM_PROPOSAL" -> "组队提案";
+            case "TEAM_VOTE" -> "队伍投票";
+            case "MISSION_ACTION" -> "任务执行";
+            case "ASSASSINATION" -> "刺杀阶段";
+            default -> phase;
+        };
     }
 
     private String streamKey(String gameId, String playerId) {

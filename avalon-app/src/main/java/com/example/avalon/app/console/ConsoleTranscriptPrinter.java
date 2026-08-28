@@ -248,7 +248,9 @@ public class ConsoleTranscriptPrinter {
                                       ConsoleLogLevel logLevel) {
         StringBuilder builder = new StringBuilder();
         builder.append("[思考] ").append(session.labelForPlayer(entry.getPlayerId()));
-        appendToolCallFlow(builder, entry, session);
+        if (logLevel != ConsoleLogLevel.INFO) {
+            appendToolCallFlow(builder, entry, session);
+        }
         String privateThought = privateThought(entry);
         Map<String, Object> validation = structuredMap(entry.getValidationResultJson());
         builder.append(System.lineSeparator())
