@@ -24,6 +24,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.stereotype.Component;
 
@@ -59,6 +60,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private final ConsoleDecisionReportBuilder decisionReportBuilder;
     private final ConsolePlaybackSettings playbackSettings;
     private final ConsolePlaybackDelayer playbackDelayer;
+    private final ObjectProvider<ConsoleModelStreamReporter> modelStreamReporter;
     private final ConfigurableApplicationContext applicationContext;
     private final Path reportOutputDir;
     private final ConsoleGameSession session = new ConsoleGameSession();
@@ -74,6 +76,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                                ConsoleDecisionReportBuilder decisionReportBuilder,
                                ConsolePlaybackSettings playbackSettings,
                                ConsolePlaybackDelayer playbackDelayer,
+                               ObjectProvider<ConsoleModelStreamReporter> modelStreamReporter,
                                @Value("${avalon.console.report.output-dir:target/reports/avalon}") String reportOutputDir,
                                ConfigurableApplicationContext applicationContext) {
         this.gameApplicationService = gameApplicationService;
@@ -87,6 +90,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         this.decisionReportBuilder = decisionReportBuilder;
         this.playbackSettings = playbackSettings;
         this.playbackDelayer = playbackDelayer;
+        this.modelStreamReporter = modelStreamReporter;
         this.reportOutputDir = Path.of(reportOutputDir);
         this.applicationContext = applicationContext;
     }
@@ -222,6 +226,10 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                     throw new IllegalArgumentException("用法：log-level <info|debug|trace>");
                 }
                 session.setLogLevel(ConsoleLogLevel.parse(parts[1]));
+                ConsoleModelStreamReporter reporter = modelStreamReporter.getIfAvailable();
+                if (reporter != null) {
+                    reporter.setLogLevel(session.logLevel());
+                }
                 System.out.println("实时日志级别=" + session.logLevel());
                 yield true;
             }

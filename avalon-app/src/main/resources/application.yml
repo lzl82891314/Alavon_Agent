@@ -25,5 +25,5 @@ avalon:
   logging:
     log-directory: ${user.home}/.avalon-agent/logs
   console:
-    enabled: false
-    model-stream-enabled: false
+    enabled: true
+    model-stream-enabled: true
