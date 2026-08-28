@@ -3,6 +3,8 @@ package com.example.avalon.agent.service;
 import com.example.avalon.agent.gateway.AgentGateway;
 import com.example.avalon.agent.gateway.OpenAiCompatibleResponseException;
 import com.example.avalon.agent.gateway.OpenAiCompatibleTransportException;
+import com.example.avalon.agent.gateway.ModelToolCallingUnsupportedException;
+import com.example.avalon.agent.harness.AgentLoopLimitException;
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
 import com.example.avalon.agent.model.MemoryUpdate;
@@ -564,6 +566,10 @@ public class ValidationRetryPolicy {
     }
 
     private boolean shouldRetry(RuntimeException failure) {
+        if (failure instanceof AgentLoopLimitException
+                || failure instanceof ModelToolCallingUnsupportedException) {
+            return false;
+        }
         if (failure instanceof CandidateKnowledgeAssertionException) {
             return true;
         }

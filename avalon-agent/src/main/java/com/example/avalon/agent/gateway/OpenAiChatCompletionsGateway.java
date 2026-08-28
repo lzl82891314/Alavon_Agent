@@ -2,7 +2,11 @@ package com.example.avalon.agent.gateway;
 
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
+import com.example.avalon.agent.model.AgentLoopStep;
+import com.example.avalon.agent.model.AgentModelTurn;
 import com.example.avalon.agent.model.RawCompletionMetadata;
+import com.example.avalon.agent.tool.ToolCall;
+import com.example.avalon.agent.tool.ToolResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -61,6 +65,15 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
 
     @Override
     public AgentTurnResult playTurn(AgentTurnRequest request) {
+        AgentModelTurn turn = nextTurn(request);
+        if (turn.requiresTools()) {
+            throw new IllegalStateException("Default harness cannot execute model tool calls");
+        }
+        return turn.finalResult();
+    }
+
+    @Override
+    public AgentModelTurn nextTurn(AgentTurnRequest request) {
         RequestSettings settings = requestSettings(request);
         long startedAt = System.nanoTime();
         String callId = streamEvents.started(request);
@@ -100,15 +113,15 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
                     request, exception, providerId(request), defaultModel(request.getModelName()),
                     "stream_interrupted");
         }
-        AgentTurnResult result;
+        AgentModelTurn turn;
         try {
-            result = parseResponse(request, response);
-            result.getModelMetadata().getAttributes().put("streaming", true);
-            result.getModelMetadata().getAttributes().put("transportAttempts", streamResponse.transportAttempts());
-            result.getModelMetadata().getAttributes().put("reasoningChars", accumulator.reasoningChars());
-            putIfNotNull(result.getModelMetadata().getAttributes(),
+            turn = parseModelTurn(request, response);
+            turn.modelMetadata().getAttributes().put("streaming", true);
+            turn.modelMetadata().getAttributes().put("transportAttempts", streamResponse.transportAttempts());
+            turn.modelMetadata().getAttributes().put("reasoningChars", accumulator.reasoningChars());
+            putIfNotNull(turn.modelMetadata().getAttributes(),
                     "firstReasoningDeltaMs", accumulator.firstReasoningDeltaMs());
-            putIfNotNull(result.getModelMetadata().getAttributes(),
+            putIfNotNull(turn.modelMetadata().getAttributes(),
                     "firstContentDeltaMs", accumulator.firstContentDeltaMs());
         } catch (RuntimeException exception) {
             streamEvents.failed(callId, request, startedAt);
@@ -118,7 +131,7 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
         LOGGER.info("model_call_response gameId={} playerId={} phase={} modelId={} elapsedMs={} streaming=true transportAttempts={}",
                 request.getGameId(), request.getPlayerId(), request.getPhase(), request.getModelId(),
                 elapsedMillis(startedAt), streamResponse.transportAttempts());
-        return result;
+        return turn;
     }
 
     private long elapsedMillis(long startedAt) {
@@ -155,6 +168,10 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
         messages.addObject()
                 .put("role", "user")
                 .put("content", request.getPromptText());
+        appendLoopMessages(messages, request);
+        if (!request.getTools().isEmpty()) {
+            ToolCallingJsonSupport.addOpenAiTools(objectMapper, root, request.getTools());
+        }
         if (request.getTemperature() != null) {
             root.put("temperature", request.getTemperature());
         }
@@ -197,6 +214,40 @@ public class OpenAiChatCompletionsGateway implements ModelProtocolAdapter {
             return result;
         } catch (RuntimeException exception) {
             throw responseException(request, response, choice, analysis, exception);
+        }
+    }
+
+    private AgentModelTurn parseModelTurn(AgentTurnRequest request, JsonNode response) {
+        JsonNode choice = response.path("choices").path(0);
+        if (choice.isMissingNode()) {
+            throw new IllegalStateException("OpenAI-compatible response did not include any choices");
+        }
+        JsonNode message = choice.path("message");
+        JsonNode nativeCalls = message.path("tool_calls");
+        if (nativeCalls.isArray() && !nativeCalls.isEmpty()) {
+            OpenAiCompatibleMessageAnalysis analysis = OpenAiCompatibleSupport.analyzeAssistantMessage(message);
+            RawCompletionMetadata metadata = metadata(request, response, choice, analysis);
+            List<ToolCall> calls = new java.util.ArrayList<>();
+            for (JsonNode call : nativeCalls) {
+                JsonNode function = call.path("function");
+                calls.add(new ToolCall(call.path("id").asText(), function.path("name").asText(),
+                        ToolCallingJsonSupport.arguments(objectMapper, function.path("arguments"))));
+            }
+            return AgentModelTurn.tools(calls, metadata);
+        }
+        return AgentModelTurn.completed(parseResponse(request, response));
+    }
+
+    private void appendLoopMessages(ArrayNode messages, AgentTurnRequest request) {
+        for (AgentLoopStep step : request.getLoopSteps()) {
+            ObjectNode assistant = messages.addObject();
+            assistant.put("role", "assistant");
+            ArrayNode calls = assistant.putArray("tool_calls");
+            step.toolCalls().forEach(call -> calls.add(ToolCallingJsonSupport.openAiToolCall(objectMapper, call)));
+            for (ToolResult result : step.toolResults()) {
+                messages.addObject().put("role", "tool").put("tool_call_id", result.callId())
+                        .put("content", ToolCallingJsonSupport.resultJson(objectMapper, result));
+            }
         }
     }
 

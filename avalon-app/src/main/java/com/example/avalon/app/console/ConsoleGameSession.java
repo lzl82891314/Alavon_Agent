@@ -1,5 +1,6 @@
 package com.example.avalon.app.console;
 
+import com.example.avalon.agent.harness.AgentHarnessType;
 import com.example.avalon.agent.model.ModelProfile;
 import com.example.avalon.agent.model.PlayerAgentConfig;
 import com.example.avalon.api.dto.CreateGameRequest;
@@ -51,6 +52,11 @@ final class ConsoleGameSession {
     String resolvedModelName(String playerId) { return resolvedModelNamesByPlayerId.get(playerId); }
 
     String roleForPlayer(String playerId) { return rolesByPlayerId.get(playerId); }
+
+    boolean isLlmPlayer(String playerId) {
+        SeatDescriptor seat = seatsByPlayerId.get(playerId);
+        return seat != null && seat.controllerType().startsWith("大模型(");
+    }
 
     void rememberRole(String playerId, String roleId) {
         if (playerId != null && roleId != null && !roleId.isBlank()) rolesByPlayerId.put(playerId, roleId);
@@ -111,10 +117,12 @@ final class ConsoleGameSession {
             if ("SEAT_BINDING".equalsIgnoreCase(request.getLlmSelection().getMode())) {
                 request.getLlmSelection().getSeatBindings().entrySet().stream()
                         .sorted(Map.Entry.comparingByKey(Comparator.naturalOrder()))
-                        .forEach(entry -> llmSelectionDetails.add(labelForSeat(entry.getKey()) + " -> " + entry.getValue()));
+                        .forEach(entry -> llmSelectionDetails.add(labelForSeat(entry.getKey()) + " -> "
+                                + entry.getValue() + " / " + harnessForSeat(request, entry.getKey())));
             } else if ("ROLE_BINDING".equalsIgnoreCase(request.getLlmSelection().getMode())) {
                 request.getLlmSelection().getRoleBindings().forEach((roleId, modelId) ->
-                        llmSelectionDetails.add(roleId + " -> " + modelId));
+                        llmSelectionDetails.add(roleId + " -> " + modelId + " / "
+                                + harnessForRole(request, roleId)));
             } else if ("RANDOM_POOL".equalsIgnoreCase(request.getLlmSelection().getMode())) {
                 List<String> candidateModelIds = request.getLlmSelection().getCandidateModelIds();
                 randomPoolModelIds = candidateModelIds == null ? List.of() : List.copyOf(candidateModelIds);
@@ -123,6 +131,14 @@ final class ConsoleGameSession {
                         : "pool=" + candidateModelIds);
             }
         }
+    }
+
+    private String harnessForSeat(CreateGameRequest request, Integer seatNo) {
+        return request.getLlmSelection().getSeatHarnessBindings().getOrDefault(seatNo, "TOOL_CALLING");
+    }
+
+    private String harnessForRole(CreateGameRequest request, String roleId) {
+        return request.getLlmSelection().getRoleHarnessBindings().getOrDefault(roleId, "TOOL_CALLING");
     }
 
     void resolveRandomPoolModelNames(List<com.example.avalon.api.dto.ModelProfileResponse> profiles) {
@@ -217,9 +233,16 @@ final class ConsoleGameSession {
         }
         String provider = provider(agentConfig);
         if (provider == null) {
-            return pooledSelectionEnabled ? "大模型(模型池)" : "大模型(noop回退)";
+            String label = pooledSelectionEnabled ? "大模型(模型池)" : "大模型(noop回退)";
+            return harnessLabel(label, agentConfig);
         }
-        return "大模型(" + provider + ")";
+        return harnessLabel("大模型(" + provider + ")", agentConfig);
+    }
+
+    private String harnessLabel(String label, PlayerAgentConfig agentConfig) {
+        return agentConfig != null && agentConfig.getHarnessType() == AgentHarnessType.TOOL_CALLING
+                ? label + " / Tool Calling"
+                : label;
     }
 
     private String provider(PlayerAgentConfig agentConfig) {

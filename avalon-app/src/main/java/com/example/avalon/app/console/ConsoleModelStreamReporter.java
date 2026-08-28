@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -20,10 +21,27 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
     private static final String PRIVATE_THOUGHT_MARKER = "\"privateThought\":\"";
     private final Object outputLock = new Object();
     private final Map<String, StreamState> streams = new ConcurrentHashMap<>();
+    private final Set<String> streamedAgents = ConcurrentHashMap.newKeySet();
+    private final Set<String> renderedAgents = ConcurrentHashMap.newKeySet();
+    private final Map<String, Integer> requestCounts = new ConcurrentHashMap<>();
     private volatile ConsoleLogLevel logLevel = ConsoleLogLevel.INFO;
 
     public void setLogLevel(ConsoleLogLevel logLevel) {
         this.logLevel = logLevel == null ? ConsoleLogLevel.INFO : logLevel;
+    }
+
+    public boolean hasStreamed(String gameId, String playerId) {
+        return streamedAgents.contains(streamKey(gameId, playerId));
+    }
+
+    public boolean hasRenderedOutput(String gameId, String playerId) {
+        return renderedAgents.contains(streamKey(gameId, playerId));
+    }
+
+    public void resetStartedActions() {
+        requestCounts.clear();
+        streamedAgents.clear();
+        renderedAgents.clear();
     }
 
     @Override
@@ -36,6 +54,8 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
                 case STARTED -> start(event);
                 case REASONING_DELTA -> reasoning(event);
                 case CONTENT_DELTA -> content(event);
+                case TOOL_CALL_ARGUMENT_DELTA -> toolArguments(event);
+                case TOOL_CALL_COMPLETE -> toolComplete(event);
                 case USAGE -> {
                     // Usage is retained for metrics and intentionally omitted from the live console.
                 }
@@ -47,8 +67,19 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
 
     private void start(ModelStreamEvent event) {
         streams.put(event.callId(), new StreamState());
-        if (logLevel != ConsoleLogLevel.INFO) {
-            System.out.printf("%n> > > [模型流] %s | %s | 已连接，等待推理分片%n",
+        String agentKey = streamKey(event.gameId(), event.playerId());
+        streamedAgents.add(agentKey);
+        int requestNo = requestCounts.merge(agentKey, 1, Integer::sum);
+        if (logLevel == ConsoleLogLevel.INFO) {
+            if (requestNo == 1) {
+                System.out.printf(">>> 玩家行动开始 | 阶段=%s | 行动者=%s%n",
+                        label(event.phase()), label(event.playerId()));
+            } else {
+                System.out.printf(">>> Agent Loop 第%d次模型请求 | 阶段=%s | 行动者=%s%n",
+                        requestNo, label(event.phase()), label(event.playerId()));
+            }
+        } else if (logLevel != ConsoleLogLevel.INFO) {
+            System.out.printf(">>> [模型流] %s | %s | 已连接，等待推理分片%n",
                     label(event.playerId()), label(event.modelId()));
         }
     }
@@ -59,7 +90,7 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
         }
         StreamState state = streams.computeIfAbsent(event.callId(), ignored -> new StreamState());
         if (!state.reasoningStarted) {
-            System.out.printf("> > > [供应商推理] %s | ", label(event.playerId()));
+            System.out.printf(">>> [供应商推理] %s | ", label(event.playerId()));
             state.reasoningStarted = true;
         }
         System.out.print(event.delta() == null ? "" : event.delta());
@@ -68,6 +99,9 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
 
     private void content(ModelStreamEvent event) {
         StreamState state = streams.computeIfAbsent(event.callId(), ignored -> new StreamState());
+        if (event.delta() != null && !event.delta().isBlank()) {
+            renderedAgents.add(streamKey(event.gameId(), event.playerId()));
+        }
         if (logLevel == ConsoleLogLevel.DEBUG || logLevel == ConsoleLogLevel.TRACE) {
             endReasoningLine(state);
             System.out.print(event.delta() == null ? "" : event.delta());
@@ -84,9 +118,33 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
         }
     }
 
+    private void toolArguments(ModelStreamEvent event) {
+        if (logLevel == ConsoleLogLevel.INFO) {
+            return;
+        }
+        StreamState state = streams.computeIfAbsent(event.callId(), ignored -> new StreamState());
+        endReasoningLine(state);
+        if (!state.toolArgumentsStarted) {
+            System.out.printf(">>> [工具参数] %s | ", label(event.playerId()));
+            state.toolArgumentsStarted = true;
+        }
+        System.out.print(event.delta() == null ? "" : event.delta());
+        System.out.flush();
+    }
+
+    private void toolComplete(ModelStreamEvent event) {
+        if (logLevel == ConsoleLogLevel.INFO) {
+            return;
+        }
+        StreamState state = streams.computeIfAbsent(event.callId(), ignored -> new StreamState());
+        endToolArgumentsLine(state);
+        System.out.printf(">>> [工具调用] %s | %s%n", label(event.playerId()), label(event.delta()));
+    }
+
     private void complete(ModelStreamEvent event, boolean success) {
         StreamState state = streams.remove(event.callId());
         endReasoningLine(state);
+        endToolArgumentsLine(state);
         if (state != null) {
             if (logLevel == ConsoleLogLevel.INFO) {
                 state.publicSpeech.finish(event.playerId());
@@ -99,11 +157,11 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
             }
         }
         if (logLevel != ConsoleLogLevel.INFO && success) {
-            System.out.printf("> > > [模型流] %s | 完成，耗时=%dms，HTTP尝试=%s%n",
+            System.out.printf(">>> [模型流] %s | 完成，耗时=%dms，HTTP尝试=%s%n",
                     label(event.playerId()), event.elapsedMillis(),
                     event.transportAttempts() == null ? "-" : event.transportAttempts());
         } else if (logLevel != ConsoleLogLevel.INFO) {
-            System.out.printf("> > > [模型流] %s | 中断，耗时=%dms%n",
+            System.out.printf(">>> [模型流] %s | 中断，耗时=%dms%n",
                     label(event.playerId()), event.elapsedMillis());
         }
     }
@@ -115,12 +173,24 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
         }
     }
 
+    private void endToolArgumentsLine(StreamState state) {
+        if (state != null && state.toolArgumentsStarted) {
+            System.out.println();
+            state.toolArgumentsStarted = false;
+        }
+    }
+
     private String label(String value) {
         return value == null || value.isBlank() ? "未知" : value;
     }
 
+    private String streamKey(String gameId, String playerId) {
+        return String.valueOf(gameId) + "|" + String.valueOf(playerId);
+    }
+
     private static final class StreamState {
         private boolean reasoningStarted;
+        private boolean toolArgumentsStarted;
         private final JsonFieldStreamer publicSpeech = new JsonFieldStreamer(
                 PUBLIC_SPEECH_MARKER, "公开发言流");
         private final JsonFieldStreamer privateThought = new JsonFieldStreamer(
@@ -147,6 +217,7 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
         private boolean escaped;
         private boolean finished;
         private boolean printed;
+        private boolean lineOpen;
         private final boolean array;
 
         private JsonFieldStreamer(String marker, String title) {
@@ -200,8 +271,9 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
         private void finish(String playerId) {
             if (found) {
                 flush(playerId);
-                if (printed) {
+                if (lineOpen) {
                     System.out.println();
+                    lineOpen = false;
                 }
             }
         }
@@ -213,14 +285,16 @@ public final class ConsoleModelStreamReporter implements ModelStreamEventListene
                 return;
             }
             if (!printed) {
-                System.out.printf("> > > [%s] %s | ", title, labelValue(playerId));
+                System.out.printf(">>> [%s] %s | ", title, labelValue(playerId));
                 printed = true;
+                lineOpen = true;
             }
             System.out.print(value);
             System.out.flush();
             if (value.endsWith("。") || value.endsWith("！") || value.endsWith("？")
                     || value.endsWith("!") || value.endsWith("?") || value.contains("\n")) {
                 System.out.println();
+                lineOpen = false;
             }
         }
 

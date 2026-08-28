@@ -2,6 +2,7 @@ package com.example.avalon.agent.gateway;
 
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
+import com.example.avalon.agent.model.AgentModelTurn;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -27,6 +28,15 @@ public class RoutingAgentGateway implements AgentGateway {
             return noopGateway.playTurn(request);
         }
         return protocolAdapters.require(request.getProtocol()).playTurn(request);
+    }
+
+    @Override
+    public AgentModelTurn nextTurn(AgentTurnRequest request) {
+        String provider = normalizedProvider(request.getProvider());
+        if (provider == null || "noop".equals(provider)) {
+            return noopGateway.nextTurn(request);
+        }
+        return protocolAdapters.require(request.getProtocol()).nextTurn(request);
     }
 
     private String normalizedProvider(String provider) {

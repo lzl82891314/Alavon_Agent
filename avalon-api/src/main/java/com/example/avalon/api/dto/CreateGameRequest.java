@@ -106,6 +106,8 @@ public class CreateGameRequest {
         private String mode;
         private Map<Integer, String> seatBindings = new LinkedHashMap<>();
         private Map<String, String> roleBindings = new LinkedHashMap<>();
+        private Map<Integer, String> seatHarnessBindings = new LinkedHashMap<>();
+        private Map<String, String> roleHarnessBindings = new LinkedHashMap<>();
         private List<String> candidateModelIds = new ArrayList<>();
 
         public String getMode() {
@@ -130,6 +132,26 @@ public class CreateGameRequest {
 
         public void setRoleBindings(Map<String, String> roleBindings) {
             this.roleBindings = roleBindings == null ? new LinkedHashMap<>() : new LinkedHashMap<>(roleBindings);
+        }
+
+        public Map<Integer, String> getSeatHarnessBindings() {
+            return seatHarnessBindings;
+        }
+
+        public void setSeatHarnessBindings(Map<Integer, String> seatHarnessBindings) {
+            this.seatHarnessBindings = seatHarnessBindings == null
+                    ? new LinkedHashMap<>()
+                    : new LinkedHashMap<>(seatHarnessBindings);
+        }
+
+        public Map<String, String> getRoleHarnessBindings() {
+            return roleHarnessBindings;
+        }
+
+        public void setRoleHarnessBindings(Map<String, String> roleHarnessBindings) {
+            this.roleHarnessBindings = roleHarnessBindings == null
+                    ? new LinkedHashMap<>()
+                    : new LinkedHashMap<>(roleHarnessBindings);
         }
 
         public List<String> getCandidateModelIds() {

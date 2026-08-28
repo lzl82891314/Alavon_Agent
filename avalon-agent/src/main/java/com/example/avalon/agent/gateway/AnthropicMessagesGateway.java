@@ -2,7 +2,11 @@ package com.example.avalon.agent.gateway;
 
 import com.example.avalon.agent.model.AgentTurnRequest;
 import com.example.avalon.agent.model.AgentTurnResult;
+import com.example.avalon.agent.model.AgentLoopStep;
+import com.example.avalon.agent.model.AgentModelTurn;
 import com.example.avalon.agent.model.RawCompletionMetadata;
+import com.example.avalon.agent.tool.ToolCall;
+import com.example.avalon.agent.tool.ToolResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -12,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Native adapter for Anthropic's Messages API. */
@@ -44,6 +49,13 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
 
     @Override
     public AgentTurnResult playTurn(AgentTurnRequest request) {
+        AgentModelTurn turn = nextTurn(request);
+        if (turn.requiresTools()) throw new IllegalStateException("Default harness cannot execute model tool calls");
+        return turn.finalResult();
+    }
+
+    @Override
+    public AgentModelTurn nextTurn(AgentTurnRequest request) {
         Map<String, Object> options = request.getProviderOptions();
         String apiKey = apiKeys.resolveApiKey(request.getModelId(), options);
         if (apiKey == null || apiKey.isBlank()) {
@@ -82,10 +94,10 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
             throw OpenAiCompatibleSupport.protocolResponseException(
                     request, exception, "anthropic", request.getModelName(), "stream_interrupted");
         }
-        AgentTurnResult result;
+        AgentModelTurn turn;
         try {
-            result = parseResponse(request, response);
-            Map<String, Object> attributes = result.getModelMetadata().getAttributes();
+            turn = parseModelTurn(request, response);
+            Map<String, Object> attributes = turn.modelMetadata().getAttributes();
             attributes.put("streaming", true);
             attributes.put("transportAttempts", streamResponse.transportAttempts());
             attributes.put("reasoningChars", accumulator.reasoningChars());
@@ -99,7 +111,7 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
                     request, exception, "anthropic", request.getModelName(), "invalid_response");
         }
         streamEvents.completed(callId, request, startedAt, streamResponse.transportAttempts());
-        return result;
+        return turn;
     }
 
     private Map<String, String> headers(String apiKey, Map<String, Object> options) {
@@ -117,6 +129,8 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
         root.put("system", "你负责控制一名阿瓦隆玩家。公开发言和 privateThought 必须使用简体中文；只返回一个 JSON 对象，不要输出原始思维链。");
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "user").put("content", request.getPromptText());
+        appendLoopMessages(messages, request);
+        if (!request.getTools().isEmpty()) ToolCallingJsonSupport.addAnthropicTools(json, root, request.getTools());
         if (request.getTemperature() != null) {
             root.put("temperature", request.getTemperature());
         }
@@ -148,6 +162,35 @@ public final class AnthropicMessagesGateway implements ModelProtocolAdapter {
             return result;
         } catch (Exception exception) {
             throw new IllegalStateException("Anthropic Messages assistant content was not valid JSON", exception);
+        }
+    }
+
+    private AgentModelTurn parseModelTurn(AgentTurnRequest request, JsonNode response) {
+        List<ToolCall> calls = new java.util.ArrayList<>();
+        for (JsonNode block : response.path("content")) {
+            if (!"tool_use".equals(block.path("type").asText())) continue;
+            calls.add(new ToolCall(block.path("id").asText(), block.path("name").asText(),
+                    ToolCallingJsonSupport.arguments(json, block.path("input"))));
+        }
+        if (calls.isEmpty()) return AgentModelTurn.completed(parseResponse(request, response));
+        return AgentModelTurn.tools(calls, metadata(request, response));
+    }
+
+    private void appendLoopMessages(ArrayNode messages, AgentTurnRequest request) {
+        for (AgentLoopStep step : request.getLoopSteps()) {
+            ArrayNode assistantContent = messages.addObject().put("role", "assistant").putArray("content");
+            for (ToolCall call : step.toolCalls()) {
+                ObjectNode block = assistantContent.addObject();
+                block.put("type", "tool_use");
+                block.put("id", call.callId());
+                block.put("name", call.toolName());
+                block.set("input", json.valueToTree(call.arguments()));
+            }
+            ArrayNode userContent = messages.addObject().put("role", "user").putArray("content");
+            for (ToolResult result : step.toolResults()) {
+                userContent.addObject().put("type", "tool_result").put("tool_use_id", result.callId())
+                        .put("content", ToolCallingJsonSupport.resultJson(json, result));
+            }
         }
     }
 

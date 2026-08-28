@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 final class AnthropicSseAccumulator {
     private final ObjectMapper json;
@@ -15,6 +17,7 @@ final class AnthropicSseAccumulator {
     private final long startedAt;
     private final StringBuilder content = new StringBuilder();
     private final StringBuilder reasoning = new StringBuilder();
+    private final Map<Integer, PendingToolUse> toolUses = new LinkedHashMap<>();
     private ObjectNode message;
     private String stopReason;
     private boolean terminalSeen;
@@ -42,8 +45,9 @@ final class AnthropicSseAccumulator {
         String type = root.path("type").asText(frame.event() == null ? "" : frame.event());
         switch (type) {
             case "message_start" -> captureMessage(root.path("message"));
-            case "content_block_start" -> appendBlock(root.path("content_block"));
-            case "content_block_delta" -> appendDelta(root.path("delta"));
+            case "content_block_start" -> appendBlock(root.path("content_block"), root.path("index").asInt(0));
+            case "content_block_delta" -> appendDelta(root.path("delta"), root.path("index").asInt(0));
+            case "content_block_stop" -> completeBlock(root.path("index").asInt(0));
             case "message_delta" -> captureMessageDelta(root);
             case "message_stop" -> terminalSeen = true;
             case "error" -> throw new IllegalStateException("Anthropic SSE returned an error: " + root.path("error"));
@@ -65,7 +69,9 @@ final class AnthropicSseAccumulator {
         if (stopReason != null) {
             result.put("stop_reason", stopReason);
         }
-        result.putArray("content").addObject().put("type", "text").put("text", content.toString());
+        var blocks = result.putArray("content");
+        if (!content.isEmpty()) blocks.addObject().put("type", "text").put("text", content.toString());
+        toolUses.values().forEach(tool -> blocks.add(tool.toJson(json)));
         return result;
     }
 
@@ -94,20 +100,31 @@ final class AnthropicSseAccumulator {
         }
     }
 
-    private void appendBlock(JsonNode block) {
+    private void appendBlock(JsonNode block, int index) {
         if ("text".equals(block.path("type").asText())) {
             appendContent(block.path("text").asText(""));
         } else if ("thinking".equals(block.path("type").asText())) {
             appendReasoning(block.path("thinking").asText(""));
+        } else if ("tool_use".equals(block.path("type").asText())) {
+            PendingToolUse tool = toolUses.computeIfAbsent(index, ignored -> new PendingToolUse());
+            tool.id = block.path("id").asText();
+            tool.name = block.path("name").asText();
+            if (block.path("input").isObject() && !block.path("input").isEmpty()) {
+                tool.input.append(block.path("input").toString());
+            }
         }
     }
 
-    private void appendDelta(JsonNode delta) {
+    private void appendDelta(JsonNode delta, int index) {
         String type = delta.path("type").asText("");
         if ("text_delta".equals(type)) {
             appendContent(delta.path("text").asText(""));
         } else if ("thinking_delta".equals(type)) {
             appendReasoning(delta.path("thinking").asText(""));
+        } else if ("input_json_delta".equals(type)) {
+            String value = delta.path("partial_json").asText("");
+            toolUses.computeIfAbsent(index, ignored -> new PendingToolUse()).input.append(value);
+            events.toolArguments(callId, request, value, startedAt);
         }
     }
 
@@ -127,7 +144,7 @@ final class AnthropicSseAccumulator {
 
     private void publishFullMessage(JsonNode root) {
         for (JsonNode block : root.path("content")) {
-            appendBlock(block);
+            appendBlock(block, toolUses.size());
         }
     }
 
@@ -163,5 +180,29 @@ final class AnthropicSseAccumulator {
 
     private long elapsedMillis() {
         return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+    }
+
+    private void completeBlock(int index) {
+        PendingToolUse tool = toolUses.get(index);
+        if (tool != null) events.toolComplete(callId, request, tool.name, startedAt);
+    }
+
+    private static final class PendingToolUse {
+        private String id;
+        private String name;
+        private final StringBuilder input = new StringBuilder();
+
+        private ObjectNode toJson(ObjectMapper json) {
+            ObjectNode block = json.createObjectNode();
+            block.put("type", "tool_use");
+            block.put("id", id);
+            block.put("name", name);
+            try {
+                block.set("input", input.isEmpty() ? json.createObjectNode() : json.readTree(input.toString()));
+            } catch (Exception exception) {
+                throw new IllegalStateException("Anthropic tool input was not valid JSON", exception);
+            }
+            return block;
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.example.avalon.api.service;
 
+import com.example.avalon.agent.harness.AgentHarnessType;
 import com.example.avalon.api.dto.CreateGameRequest;
 import com.example.avalon.api.dto.GameActionSubmissionRequest;
 import com.example.avalon.api.dto.GameAuditEntryResponse;
@@ -323,6 +324,7 @@ public class PersistentGameApplicationService implements GameApplicationService,
     private LlmSelectionConfig seatBindingSelection(CreateGameRequest.LlmSelectionRequest request,
                                                     List<PlayerRegistration> llmPlayers) {
         Map<Integer, String> seatBindings = new LinkedHashMap<>();
+        Map<Integer, String> harnessBindings = new LinkedHashMap<>();
         for (Map.Entry<Integer, String> entry : request.getSeatBindings().entrySet()) {
             Integer seatNo = entry.getKey();
             if (seatNo == null || llmPlayers.stream().noneMatch(player -> player.seatNo() == seatNo)) {
@@ -336,15 +338,29 @@ public class PersistentGameApplicationService implements GameApplicationService,
             }
             modelProfileCatalogService.requireEnabledProfile(modelId.trim());
             seatBindings.put(player.seatNo(), modelId.trim());
+            harnessBindings.put(player.seatNo(), normalizedHarnessType(
+                    request.getSeatHarnessBindings().get(player.seatNo())));
         }
         if (request.getSeatBindings().size() != seatBindings.size()) {
             throw new IllegalArgumentException("SEAT_BINDING may only reference active LLM seats");
         }
-        return new LlmSelectionConfig(LlmSelectionMode.SEAT_BINDING, seatBindings, Map.of(), List.of());
+        if (request.getSeatHarnessBindings().keySet().stream().anyMatch(seatNo -> !seatBindings.containsKey(seatNo))) {
+            throw new IllegalArgumentException("SEAT_BINDING harness may only reference active LLM seats");
+        }
+        return new LlmSelectionConfig(LlmSelectionMode.SEAT_BINDING, seatBindings, Map.of(),
+                harnessBindings, Map.of(), List.of());
+    }
+
+    @Override
+    public List<GameEventEntryResponse> getEvents(String gameId, AdminInspectionCapability capability) {
+        adminAuthorizationPolicy.requireAuthorized(capability);
+        return replayQueryService.allEvents(gameId).stream()
+                .map(this::toEventResponse).toList();
     }
 
     private LlmSelectionConfig roleBindingSelection(CreateGameRequest.LlmSelectionRequest request, SetupTemplate setupTemplate) {
         Map<String, String> roleBindings = new LinkedHashMap<>();
+        Map<String, String> harnessBindings = new LinkedHashMap<>();
         for (String roleId : distinctRoleIds(setupTemplate)) {
             String modelId = request.getRoleBindings().get(roleId);
             if (modelId == null || modelId.isBlank()) {
@@ -352,11 +368,16 @@ public class PersistentGameApplicationService implements GameApplicationService,
             }
             modelProfileCatalogService.requireEnabledProfile(modelId.trim());
             roleBindings.put(roleId, modelId.trim());
+            harnessBindings.put(roleId, normalizedHarnessType(request.getRoleHarnessBindings().get(roleId)));
         }
         if (request.getRoleBindings().size() != roleBindings.size()) {
             throw new IllegalArgumentException("ROLE_BINDING may only reference active roles in the setup template");
         }
-        return new LlmSelectionConfig(LlmSelectionMode.ROLE_BINDING, Map.of(), roleBindings, List.of());
+        if (request.getRoleHarnessBindings().keySet().stream().anyMatch(roleId -> !roleBindings.containsKey(roleId))) {
+            throw new IllegalArgumentException("ROLE_BINDING harness may only reference active roles in the setup template");
+        }
+        return new LlmSelectionConfig(LlmSelectionMode.ROLE_BINDING, Map.of(), roleBindings,
+                Map.of(), harnessBindings, List.of());
     }
 
     private LlmSelectionConfig randomPoolSelection(CreateGameRequest.LlmSelectionRequest request) {
@@ -372,7 +393,19 @@ public class PersistentGameApplicationService implements GameApplicationService,
             throw new IllegalArgumentException("RANDOM_POOL requires at least one enabled model profile");
         }
         candidateModelIds.forEach(modelProfileCatalogService::requireEnabledProfile);
-        return new LlmSelectionConfig(LlmSelectionMode.RANDOM_POOL, Map.of(), Map.of(), candidateModelIds);
+        return new LlmSelectionConfig(LlmSelectionMode.RANDOM_POOL, Map.of(), Map.of(),
+                Map.of(), Map.of(), candidateModelIds);
+    }
+
+    private String normalizedHarnessType(String value) {
+        if (value == null || value.isBlank()) {
+            return AgentHarnessType.TOOL_CALLING.name();
+        }
+        try {
+            return AgentHarnessType.valueOf(value.trim().toUpperCase()).name();
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Unsupported Agent Harness: " + value);
+        }
     }
 
     private Map<String, RoleDefinition> roleDefinitionsFor(SetupTemplate setupTemplate) {

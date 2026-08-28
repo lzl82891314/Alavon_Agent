@@ -36,6 +36,16 @@ public final class ModelStreamEventPublisher {
         publish(callId, request, ModelStreamEventType.CONTENT_DELTA, delta, elapsedMillis(startedAt), null);
     }
 
+    public void toolArguments(String callId, AgentTurnRequest request, String delta, long startedAt) {
+        publish(callId, request, ModelStreamEventType.TOOL_CALL_ARGUMENT_DELTA, delta,
+                elapsedMillis(startedAt), null);
+    }
+
+    public void toolComplete(String callId, AgentTurnRequest request, String toolName, long startedAt) {
+        publish(callId, request, ModelStreamEventType.TOOL_CALL_COMPLETE, toolName,
+                elapsedMillis(startedAt), null);
+    }
+
     public void usage(String callId, AgentTurnRequest request, String usageJson, long startedAt) {
         publish(callId, request, ModelStreamEventType.USAGE, usageJson, elapsedMillis(startedAt), null);
     }

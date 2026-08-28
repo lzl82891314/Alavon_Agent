@@ -34,6 +34,12 @@ public class ReplayQueryService {
         return publicEvents(gameId);
     }
 
+    public List<GameEventRecord> allEvents(String gameId) {
+        return gameEventStore.findByGameId(gameId).stream()
+                .sorted(Comparator.comparingLong(GameEventRecord::seqNo))
+                .toList();
+    }
+
     public List<ReplayProjectionStep> replay(String gameId) {
         return publicEvents(gameId).stream()
                 .sorted(Comparator.comparingLong(GameEventRecord::seqNo))

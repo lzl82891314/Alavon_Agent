@@ -32,5 +32,8 @@
     <logger name="com.example.avalon.agent.service" level="INFO" additivity="false">
         <appender-ref ref="VALIDATION_FILE"/>
     </logger>
+    <logger name="com.example.avalon.agent.harness.ToolCallingAgentHarness" level="INFO" additivity="false">
+        <appender-ref ref="APPLICATION_FILE"/>
+    </logger>
     <root level="INFO"><appender-ref ref="APPLICATION_FILE"/></root>
 </configuration>

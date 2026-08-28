@@ -136,6 +136,11 @@ public class ConsoleTranscriptPrinter {
     }
 
     public String formatEvent(GameEventEntryResponse event, ConsoleGameSession session) {
+        return formatEvent(event, session, false);
+    }
+
+    public String formatEvent(GameEventEntryResponse event, ConsoleGameSession session,
+                              boolean suppressAgentResponse) {
         StringBuilder builder = new StringBuilder();
         builder.append("[#").append(event.getSeqNo()).append("] ")
                 .append(eventTypeLabel(event.getType()))
@@ -162,15 +167,17 @@ public class ConsoleTranscriptPrinter {
                 }
             }
             case "PLAYER_ACTION" -> {
-                builder.append(System.lineSeparator())
-                        .append("  身份=").append(roleLabel(session.roleForPlayer(event.getActorId())));
-                if (session.isCurrentLeader(payload.get("seatNo"))) {
-                    builder.append(" | 队长");
-                }
-                builder.append(" | 动作=").append(actionTypeLabel(payload.get("actionType")));
-                String speech = stringValue(payload.get("speech"));
-                if (speech != null) {
-                    builder.append(System.lineSeparator()).append("  公开发言=").append(speech);
+                if (!(suppressAgentResponse && session.isLlmPlayer(event.getActorId()))) {
+                    builder.append(System.lineSeparator())
+                            .append("  身份=").append(roleLabel(session.roleForPlayer(event.getActorId())));
+                    if (session.isCurrentLeader(payload.get("seatNo"))) {
+                        builder.append(" | 队长");
+                    }
+                    builder.append(" | 动作=").append(actionTypeLabel(payload.get("actionType")));
+                    String speech = stringValue(payload.get("speech"));
+                    if (speech != null) {
+                        builder.append(System.lineSeparator()).append("  公开发言=").append(speech);
+                    }
                 }
             }
             case "TEAM_PROPOSED" -> builder.append(System.lineSeparator())
@@ -241,6 +248,7 @@ public class ConsoleTranscriptPrinter {
                                       ConsoleLogLevel logLevel) {
         StringBuilder builder = new StringBuilder();
         builder.append("[思考] ").append(session.labelForPlayer(entry.getPlayerId()));
+        appendToolCallFlow(builder, entry, session);
         String privateThought = privateThought(entry);
         Map<String, Object> validation = structuredMap(entry.getValidationResultJson());
         builder.append(System.lineSeparator())
@@ -272,6 +280,55 @@ public class ConsoleTranscriptPrinter {
             appendJsonBlock(builder, "校验结果", entry.getValidationResultJson());
         }
         return builder.toString();
+    }
+
+    public String formatToolCallFlow(GameAuditEntryResponse entry, ConsoleGameSession session) {
+        StringBuilder builder = new StringBuilder();
+        appendToolCallFlow(builder, entry, session);
+        return builder.isEmpty() ? null : builder.substring(System.lineSeparator().length());
+    }
+
+    private void appendToolCallFlow(StringBuilder builder, GameAuditEntryResponse entry,
+                                    ConsoleGameSession session) {
+        Map<String, Object> rawModelResponse = structuredMap(entry.getRawModelResponseJson());
+        Object auditValue = rawModelResponse.get("agentToolAudit");
+        if (!(auditValue instanceof Collection<?> calls) || calls.isEmpty()) {
+            return;
+        }
+        List<String> invoked = new ArrayList<>();
+        List<String> returned = new ArrayList<>();
+        for (Object value : calls) {
+            if (!(value instanceof Map<?, ?> call)) {
+                continue;
+            }
+            String toolName = stringValue(call.get("toolName"));
+            if (toolName == null) {
+                continue;
+            }
+            Object arguments = call.get("arguments");
+            invoked.add(toolName + (arguments == null ? "" : "(" + formatCompactValue(arguments) + ")"));
+            Object resultSummary = call.get("resultSummary");
+            Object result = resultSummary instanceof Map<?, ?> summary ? summary.get("content") : null;
+            String status = stringValue(call.get("status"));
+            returned.add(toolName + "=" + (result == null ? "-" : formatCompactValue(result))
+                    + (status == null ? "" : " [" + status + "]"));
+        }
+        if (invoked.isEmpty()) {
+            return;
+        }
+        builder.append(System.lineSeparator())
+                .append(entry.getEventSeqNo() == null ? "?" : entry.getEventSeqNo())
+                .append("|").append(session.labelForPlayer(entry.getPlayerId()))
+                .append("|工具调用|调用了：").append(String.join("，", invoked))
+                .append("|返回结果：").append(String.join("；", returned));
+    }
+
+    private String formatCompactValue(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ignored) {
+            return String.valueOf(value);
+        }
     }
 
     public String formatModelProbe(ModelProfileProbeResponse response) {

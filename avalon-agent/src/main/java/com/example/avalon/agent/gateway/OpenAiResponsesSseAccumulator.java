@@ -45,7 +45,13 @@ final class OpenAiResponsesSseAccumulator {
                 appendReasoning(delta);
             } else if (type.contains("output_text")) {
                 appendContent(delta);
+            } else if (type.contains("function_call_arguments")) {
+                events.toolArguments(callId, request, delta, startedAt);
             }
+            return;
+        }
+        if (type.contains("function_call_arguments") && type.endsWith(".done")) {
+            events.toolComplete(callId, request, root.path("name").asText("tool"), startedAt);
             return;
         }
         if ("response.created".equals(type) || "response.in_progress".equals(type)) {

@@ -293,7 +293,6 @@ model SSE request
 循环有明确限制：
 
 - 最大模型调用次数
-- 最大工具调用次数
 - 单工具超时
 - 总回合 Deadline
 - 最大累计输入和输出 Token
@@ -541,7 +540,6 @@ providerStateMode: STATELESS_REPLAY
 budget:
   deadlineSeconds: 45
   maxModelCalls: 3
-  maxToolCalls: 4
   maxInputTokens: 24000
   maxOutputTokens: 1200
   maxEstimatedCostUsd: 0.20

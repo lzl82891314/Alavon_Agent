@@ -13,6 +13,7 @@ import com.example.avalon.agent.service.ResponseParser;
 import com.example.avalon.agent.service.ValidatedAgentTurn;
 import com.example.avalon.agent.service.ValidationRetryPolicy;
 import com.example.avalon.agent.harness.AgentHarness;
+import com.example.avalon.agent.harness.AgentHarnessResolver;
 import com.example.avalon.agent.harness.DefaultAgentHarness;
 import com.example.avalon.agent.harness.HarnessExecution;
 import com.example.avalon.core.game.model.PlayerActionResult;
@@ -39,10 +40,14 @@ public class LlmPlayerController implements PlayerController {
             "firstContentDeltaMs",
             "reasoningChars",
             "finishReason",
-            "gatewayType"
+            "gatewayType",
+            "agentRunId",
+            "agentLoopIterations",
+            "agentToolCalls",
+            "agentToolAudit"
     );
 
-    private final AgentHarness harness;
+    private final AgentHarnessResolver harnessResolver;
     private final PlayerAgentConfig playerAgentConfig;
 
     public LlmPlayerController(AgentGateway agentGateway,
@@ -51,18 +56,24 @@ public class LlmPlayerController implements PlayerController {
                                ResponseParser responseParser,
                                ValidationRetryPolicy validationRetryPolicy,
                                PlayerAgentConfig playerAgentConfig) {
-        this.harness = new DefaultAgentHarness(requestFactory, promptBuilder, agentGateway, responseParser, validationRetryPolicy);
+        this.harnessResolver = new AgentHarnessResolver(List.of(
+                new DefaultAgentHarness(requestFactory, promptBuilder, agentGateway, responseParser, validationRetryPolicy)));
         this.playerAgentConfig = playerAgentConfig == null ? new PlayerAgentConfig() : playerAgentConfig;
     }
 
     public LlmPlayerController(AgentHarness harness, PlayerAgentConfig playerAgentConfig) {
-        this.harness = harness;
+        this(new AgentHarnessResolver(List.of(harness)), playerAgentConfig);
+    }
+
+    public LlmPlayerController(AgentHarnessResolver harnessResolver, PlayerAgentConfig playerAgentConfig) {
+        this.harnessResolver = harnessResolver;
         this.playerAgentConfig = playerAgentConfig == null ? new PlayerAgentConfig() : playerAgentConfig;
     }
 
     @Override
     public PlayerActionResult act(PlayerTurnContext context) {
         try {
+            AgentHarness harness = harnessResolver.resolve(playerAgentConfig.getHarnessType());
             HarnessExecution validated = harness.execute(context, playerAgentConfig);
             AgentTurnResult turnResult = validated.turnResult();
             return new PlayerActionResult(
@@ -156,6 +167,7 @@ public class LlmPlayerController implements PlayerController {
             }
         }
         payload.put("attempts", attempts);
+        payload.put("harnessType", playerAgentConfig.getHarnessType().name());
         payload.put("outputSchemaVersion", request.getOutputSchemaVersion());
         payload.put("inputContext", inputContext(request));
         payload.put("rawModelResponse", rawModelResponse(turnResult));
@@ -237,6 +249,7 @@ public class LlmPlayerController implements PlayerController {
                                                 Throwable throwable) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("attempts", attempts);
+        payload.put("harnessType", playerAgentConfig.getHarnessType().name());
         payload.put("outputSchemaVersion", request.getOutputSchemaVersion());
         payload.put("inputContext", inputContext(request));
         payload.put("rawModelResponse", failureRawModelResponse(turnResult, throwable));

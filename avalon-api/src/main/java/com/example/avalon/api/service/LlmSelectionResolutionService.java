@@ -1,5 +1,6 @@
 package com.example.avalon.api.service;
 
+import com.example.avalon.agent.harness.AgentHarnessType;
 import com.example.avalon.agent.model.ModelProfile;
 import com.example.avalon.agent.model.PlayerAgentConfig;
 import com.example.avalon.api.model.CatalogModelProfile;
@@ -58,7 +59,9 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
             if (modelId == null || modelId.isBlank()) {
                 throw new IllegalArgumentException("Missing model binding for seat " + player.seatNo());
             }
-            resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player, modelProfileCatalogService.requireEnabledProfile(modelId)));
+            resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player,
+                    modelProfileCatalogService.requireEnabledProfile(modelId),
+                    selectionConfig.seatHarnessBindings().get(player.seatNo())));
         }
         return resolvedConfigs;
     }
@@ -73,7 +76,9 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
             if (modelId == null || modelId.isBlank()) {
                 throw new IllegalArgumentException("Missing model binding for role " + roleId);
             }
-            resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player, modelProfileCatalogService.requireEnabledProfile(modelId)));
+            resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player,
+                    modelProfileCatalogService.requireEnabledProfile(modelId),
+                    selectionConfig.roleHarnessBindings().get(roleId)));
         }
         return resolvedConfigs;
     }
@@ -89,12 +94,13 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
             PlayerRegistration player = llmPlayers.get(index);
             String modelId = candidateIds.get(index % candidateIds.size());
             CatalogModelProfile profile = modelProfileCatalogService.requireEnabledProfile(modelId);
-            resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player, profile));
+            resolvedConfigs.put(player.playerId(), resolvedControllerConfig(player, profile, null));
         }
         return resolvedConfigs;
     }
 
-    private Map<String, Object> resolvedControllerConfig(PlayerRegistration player, CatalogModelProfile profile) {
+    private Map<String, Object> resolvedControllerConfig(PlayerRegistration player, CatalogModelProfile profile,
+                                                         String harnessType) {
         PlayerAgentConfig config = objectMapper.convertValue(player.controllerConfig(), PlayerAgentConfig.class);
         ModelProfile modelProfile = new ModelProfile();
         modelProfile.setModelId(profile.modelId());
@@ -104,6 +110,9 @@ public class LlmSelectionResolutionService implements ResolvedLlmConfigInitializ
         modelProfile.setTemperature(profile.temperature());
         modelProfile.setProviderOptions(profile.providerOptions());
         config.setModelProfile(modelProfile);
+        if (harnessType != null && !harnessType.isBlank()) {
+            config.setHarnessType(AgentHarnessType.valueOf(harnessType));
+        }
         return objectMapper.convertValue(config, new TypeReference<Map<String, Object>>() { });
     }
 }

@@ -1,5 +1,7 @@
 package com.example.avalon.agent.model;
 
+import com.example.avalon.agent.tool.ToolDescriptor;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +31,8 @@ public class AgentTurnRequest {
     private String outputSchemaVersion;
     private String promptText;
     private Map<String, Object> providerOptions = new LinkedHashMap<>();
+    private List<ToolDescriptor> tools = List.of();
+    private List<AgentLoopStep> loopSteps = List.of();
 
     public String getGameId() {
         return gameId;
@@ -199,6 +203,22 @@ public class AgentTurnRequest {
         this.providerOptions = providerOptions == null ? new LinkedHashMap<>() : new LinkedHashMap<>(providerOptions);
     }
 
+    public List<ToolDescriptor> getTools() {
+        return tools;
+    }
+
+    public void setTools(List<ToolDescriptor> tools) {
+        this.tools = tools == null ? List.of() : List.copyOf(tools);
+    }
+
+    public List<AgentLoopStep> getLoopSteps() {
+        return loopSteps;
+    }
+
+    public void setLoopSteps(List<AgentLoopStep> loopSteps) {
+        this.loopSteps = loopSteps == null ? List.of() : List.copyOf(loopSteps);
+    }
+
     public AgentTurnRequest copy() {
         AgentTurnRequest copy = new AgentTurnRequest();
         copy.setGameId(gameId);
@@ -225,6 +245,8 @@ public class AgentTurnRequest {
         copy.setOutputSchemaVersion(outputSchemaVersion);
         copy.setPromptText(promptText);
         copy.setProviderOptions(providerOptions);
+        copy.setTools(tools);
+        copy.setLoopSteps(loopSteps);
         return copy;
     }
 }

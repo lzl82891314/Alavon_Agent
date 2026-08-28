@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 final class OpenAiChatSseAccumulator {
     private static final List<String> REASONING_FIELDS = List.of(
@@ -19,6 +21,7 @@ final class OpenAiChatSseAccumulator {
     private final long startedAt;
     private final StringBuilder content = new StringBuilder();
     private final StringBuilder reasoning = new StringBuilder();
+    private final Map<Integer, PendingToolCall> toolCalls = new LinkedHashMap<>();
     private ObjectNode metadata;
     private JsonNode usage;
     private JsonNode fullResponse;
@@ -71,8 +74,10 @@ final class OpenAiChatSseAccumulator {
         JsonNode delta = choice.path("delta");
         appendReasoning(delta);
         appendContent(delta.path("content"));
+        appendToolCalls(delta.path("tool_calls"));
         if (choice.path("finish_reason").isTextual()) {
             finishReason = choice.path("finish_reason").asText();
+            toolCalls.values().forEach(call -> events.toolComplete(callId, request, call.name, startedAt));
             terminalSeen = true;
         }
     }
@@ -96,6 +101,10 @@ final class OpenAiChatSseAccumulator {
         message.put("content", content.toString());
         if (!reasoning.isEmpty()) {
             message.put("reasoning_content", reasoning.toString());
+        }
+        if (!toolCalls.isEmpty()) {
+            var calls = message.putArray("tool_calls");
+            toolCalls.values().forEach(call -> calls.add(call.toJson(json)));
         }
         return root;
     }
@@ -168,6 +177,25 @@ final class OpenAiChatSseAccumulator {
             firstContentDeltaMs = elapsedMillis();
             events.content(callId, request, value.asText(), startedAt);
         }
+        for (JsonNode call : message.path("tool_calls")) {
+            events.toolComplete(callId, request, call.path("function").path("name").asText("tool"), startedAt);
+        }
+    }
+
+    private void appendToolCalls(JsonNode values) {
+        if (!values.isArray()) return;
+        for (JsonNode value : values) {
+            int index = value.path("index").asInt(0);
+            PendingToolCall call = toolCalls.computeIfAbsent(index, ignored -> new PendingToolCall());
+            if (value.path("id").isTextual()) call.id = value.path("id").asText();
+            JsonNode function = value.path("function");
+            if (function.path("name").isTextual()) call.name = function.path("name").asText();
+            String arguments = function.path("arguments").asText("");
+            if (!arguments.isEmpty()) {
+                call.arguments.append(arguments);
+                events.toolArguments(callId, request, arguments, startedAt);
+            }
+        }
     }
 
     private JsonNode read(String data) {
@@ -180,5 +208,19 @@ final class OpenAiChatSseAccumulator {
 
     private long elapsedMillis() {
         return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+    }
+
+    private static final class PendingToolCall {
+        private String id;
+        private String name;
+        private final StringBuilder arguments = new StringBuilder();
+
+        private ObjectNode toJson(ObjectMapper json) {
+            ObjectNode result = json.createObjectNode();
+            result.put("id", id);
+            result.put("type", "function");
+            result.putObject("function").put("name", name).put("arguments", arguments.toString());
+            return result;
+        }
     }
 }

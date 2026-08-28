@@ -1,5 +1,6 @@
 package com.example.avalon.app.console;
 
+import com.example.avalon.agent.harness.AgentHarnessType;
 import com.example.avalon.agent.model.PlayerAgentConfig;
 import com.example.avalon.api.dto.CreateGameRequest;
 import com.example.avalon.api.dto.GameAuditEntryResponse;
@@ -41,6 +42,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 
 @Component
 @ConditionalOnProperty(prefix = "avalon.console", name = "enabled", havingValue = "true")
@@ -288,10 +290,11 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                     modelPoolLlmSeats(playerCount),
                     promptRoleBindingSelection(reader, setupTemplate)
             );
-            case RANDOM_MODEL_POOL -> new CreateRequestDraft(
-                    modelPoolLlmSeats(playerCount),
-                    promptRandomPoolSelection(reader)
-            );
+            case RANDOM_MODEL_POOL -> {
+                List<SeatInput> seats = modelPoolLlmSeats(playerCount);
+                configureRandomPoolHarness(reader, seats, request.getSeed());
+                yield new CreateRequestDraft(seats, promptRandomPoolSelection(reader));
+            }
             case CUSTOM -> promptCustomSeats(reader, setupTemplate, playerCount);
         };
 
@@ -382,6 +385,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     private CreateRequestDraft promptCustomSeats(BufferedReader reader, SetupTemplate setupTemplate, int playerCount) throws IOException {
         List<SeatInput> seats = new ArrayList<>();
         List<SeatMode> modes = new ArrayList<>();
+        List<AgentHarnessType> harnessTypes = new ArrayList<>();
         List<String> displayNames = new ArrayList<>();
         List<Integer> modelPoolSeatNos = new ArrayList<>();
         int noopSeatCount = 0;
@@ -392,6 +396,9 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             SeatMode mode = promptSeatMode(reader, seatNo);
             displayNames.add(displayName);
             modes.add(mode);
+            harnessTypes.add(mode == SeatMode.NOOP_LLM
+                    ? AgentHarnessType.DEFAULT
+                    : AgentHarnessType.TOOL_CALLING);
             if (mode == SeatMode.MODEL_POOL_LLM) {
                 modelPoolSeatNos.add(seatNo);
             }
@@ -416,6 +423,9 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                 case NOOP_LLM -> defaultNoopLlmConfig();
                 case MODEL_POOL_LLM -> defaultModelPoolLlmConfig();
             };
+            if (agentConfig != null) {
+                agentConfig.setHarnessType(harnessTypes.get(index));
+            }
             String controllerType = mode == SeatMode.SCRIPTED ? "SCRIPTED" : "LLM";
             seats.add(new SeatInput(seatNo, displayName, controllerType, agentConfig));
         }
@@ -443,8 +453,65 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         }
     }
 
+    private AgentHarnessType promptHarnessType(BufferedReader reader, int seatNo) throws IOException {
+        return promptHarnessType(reader, seatNo + "号位");
+    }
+
+    private AgentHarnessType promptHarnessType(BufferedReader reader, String target) throws IOException {
+        while (true) {
+            String raw = promptString(reader,
+                    target + " Agent Harness [tool/default]（默认 tool）：",
+                    "tool").toLowerCase(Locale.ROOT);
+            switch (raw) {
+                case "default", "d" -> {
+                    return AgentHarnessType.DEFAULT;
+                }
+                case "tool", "tool-calling", "t" -> {
+                    return AgentHarnessType.TOOL_CALLING;
+                }
+                default -> System.out.println("无效 Harness。可选 default 或 tool。");
+            }
+        }
+    }
+
+    private void configureRandomPoolHarness(BufferedReader reader,
+                                            List<SeatInput> seats,
+                                            long seed) throws IOException {
+        String raw = promptString(reader,
+                "全体 Agent Harness [random/default/tool]（默认 default）：",
+                "default").toLowerCase(Locale.ROOT);
+        while (!raw.equals("random") && !raw.equals("rand")
+                && !raw.equals("default") && !raw.equals("d")
+                && !raw.equals("tool") && !raw.equals("tool-calling") && !raw.equals("t")) {
+            System.out.println("无效 Harness。可选 random、default 或 tool。");
+            raw = promptString(reader,
+                    "全体 Agent Harness [random/default/tool]（默认 default）：",
+                    "default").toLowerCase(Locale.ROOT);
+        }
+        if (raw.equals("random") || raw.equals("rand")) {
+            Random random = new Random(seed);
+            for (int index = 0; index < seats.size(); index++) {
+                seats.set(index, withHarness(seats.get(index),
+                        random.nextBoolean() ? AgentHarnessType.DEFAULT : AgentHarnessType.TOOL_CALLING));
+            }
+            return;
+        }
+        AgentHarnessType harnessType = raw.equals("default") || raw.equals("d")
+                ? AgentHarnessType.DEFAULT
+                : AgentHarnessType.TOOL_CALLING;
+        for (int index = 0; index < seats.size(); index++) {
+            seats.set(index, withHarness(seats.get(index), harnessType));
+        }
+    }
+
+    private SeatInput withHarness(SeatInput seat, AgentHarnessType harnessType) {
+        seat.agentConfig().setHarnessType(harnessType);
+        return seat;
+    }
+
     private PlayerAgentConfig defaultNoopLlmConfig() {
         PlayerAgentConfig config = new PlayerAgentConfig();
+        config.setHarnessType(AgentHarnessType.DEFAULT);
         config.setOutputSchemaVersion("v1");
         config.setCognition(Map.of("evidenceThreshold", 0.55, "beliefRevisionRate", 0.35));
         config.setCommunication(Map.of("challengeRate", 0.45, "commitmentStrength", 0.60));
@@ -497,6 +564,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                     seatNo + "号位使用的 modelId [" + defaultModelId + "]：",
                     defaultModelId);
             request.getSeatBindings().put(seatNo, modelId);
+            request.getSeatHarnessBindings().put(seatNo, promptHarnessType(reader, seatNo).name());
         }
         return request;
     }
@@ -518,6 +586,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
                     "身份 " + roleId + " 使用的 modelId [" + defaultModelId + "]：",
                     defaultModelId);
             request.getRoleBindings().put(roleId, modelId);
+            request.getRoleHarnessBindings().put(roleId, promptHarnessType(reader, "身份 " + roleId).name());
         }
         return request;
     }
@@ -635,6 +704,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             return;
         }
         syncCurrentLeader(before);
+        resetModelStreamActionStarts();
         gameApplicationService.stepGame(gameId);
         printNewEvents();
         printNewAudits();
@@ -656,6 +726,7 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             syncCurrentLeader(state);
             announceTurn(state);
             playbackDelayer.sleep(playbackSettings.enabled() ? playbackSettings.actorLeadInMs() : 0L);
+            resetModelStreamActionStarts();
             gameApplicationService.stepGame(gameId);
             printNewEvents();
             printNewAudits();
@@ -681,6 +752,13 @@ public class AvalonConsoleRunner implements ApplicationRunner {
             return;
         }
         System.out.println(printer.formatTurnLeadIn(state, session));
+    }
+
+    private void resetModelStreamActionStarts() {
+        ConsoleModelStreamReporter reporter = modelStreamReporter.getIfAvailable();
+        if (reporter != null) {
+            reporter.resetStartedActions();
+        }
     }
 
     private void printState() {
@@ -724,7 +802,8 @@ public class AvalonConsoleRunner implements ApplicationRunner {
 
     private void printAllEvents() {
         ensureActiveGame();
-        List<GameEventEntryResponse> events = gameApplicationService.getEvents(session.gameId());
+        List<GameEventEntryResponse> events = adminGameInspectionService.getEvents(
+                session.gameId(), adminInspectionCapability);
         if (events.isEmpty()) {
             System.out.println("当前还没有事件记录。");
             return;
@@ -777,11 +856,20 @@ public class AvalonConsoleRunner implements ApplicationRunner {
     }
 
     private void printNewEvents() {
-        List<GameEventEntryResponse> events = gameApplicationService.getEvents(session.gameId());
+        List<GameEventEntryResponse> events = adminGameInspectionService.getEvents(
+                session.gameId(), adminInspectionCapability);
         events.stream()
                 .filter(event -> event.getSeqNo() != null && event.getSeqNo() > session.lastPrintedEventSeqNo())
                 .forEach(event -> {
-                    System.out.println(printer.formatEvent(event, session));
+                    long previous = session.lastPrintedEventSeqNo();
+                    if (previous > 0 && event.getSeqNo() > previous + 1) {
+                        System.out.printf(">>> [%d-%d] 中间事件属于私有信息，已按可见性策略隐藏%n",
+                                previous + 1, event.getSeqNo() - 1);
+                    }
+                    ConsoleModelStreamReporter reporter = modelStreamReporter.getIfAvailable();
+                    boolean liveStream = reporter != null
+                            && reporter.hasStreamed(session.gameId(), event.getActorId());
+                    System.out.println(printer.formatEvent(event, session, liveStream));
                     session.updateLastPrintedEventSeqNo(event.getSeqNo());
                 });
     }
@@ -792,7 +880,19 @@ public class AvalonConsoleRunner implements ApplicationRunner {
         auditEntries.stream()
                 .filter(entry -> entry.getEventSeqNo() != null && entry.getEventSeqNo() > session.lastPrintedAuditEventSeqNo())
                 .forEach(entry -> {
-                    System.out.println(printer.formatInlineThought(entry, session, session.logLevel()));
+                    ConsoleModelStreamReporter reporter = modelStreamReporter.getIfAvailable();
+                    boolean liveStream = reporter != null
+                            && reporter.hasStreamed(session.gameId(), entry.getPlayerId());
+                    boolean renderedOutput = reporter != null
+                            && reporter.hasRenderedOutput(session.gameId(), entry.getPlayerId());
+                    if (liveStream && renderedOutput && session.isLlmPlayer(entry.getPlayerId())) {
+                        String toolFlow = printer.formatToolCallFlow(entry, session);
+                        if (toolFlow != null) {
+                            System.out.println(toolFlow);
+                        }
+                    } else {
+                        System.out.println(printer.formatInlineThought(entry, session, session.logLevel()));
+                    }
                     session.updateLastPrintedAuditEventSeqNo(entry.getEventSeqNo());
                 });
     }

@@ -9,7 +9,11 @@ import com.example.avalon.agent.service.PromptBuilder;
 import com.example.avalon.agent.service.ResponseParser;
 import com.example.avalon.agent.service.ValidationRetryPolicy;
 import com.example.avalon.agent.harness.AgentHarness;
+import com.example.avalon.agent.harness.AgentHarnessResolver;
 import com.example.avalon.agent.harness.DefaultAgentHarness;
+import com.example.avalon.agent.harness.ToolCallingAgentHarness;
+import com.example.avalon.agent.tool.ToolExecutor;
+import com.example.avalon.agent.tool.ToolPolicy;
 import com.example.avalon.api.service.LlmSelectionResolutionService;
 import com.example.avalon.api.service.SeedGenerator;
 import com.example.avalon.config.io.YamlConfigLoader;
@@ -50,6 +54,7 @@ import java.nio.file.Path;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.List;
 
 @Configuration
 public class AvalonApplicationConfig {
@@ -91,17 +96,12 @@ public class AvalonApplicationConfig {
 
     @Bean
     PlayerControllerResolver playerControllerResolver(
-            AgentGateway agentGateway,
-            AgentTurnRequestFactory agentTurnRequestFactory,
-            PromptBuilder promptBuilder,
-            ResponseParser responseParser,
-            ValidationRetryPolicy validationRetryPolicy,
-            AgentHarness agentHarness
+            AgentHarnessResolver agentHarnessResolver
     ) {
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         PlayerControllerResolver resolver = new PlayerControllerResolver();
         resolver.registerFactory(PlayerControllerType.LLM, (state, player) -> new LlmPlayerController(
-                agentHarness,
+                agentHarnessResolver,
                 objectMapper.convertValue(
                         state.resolvedLlmControllerConfigOf(player.playerId()) == null
                                 ? player.controllerConfig()
@@ -116,6 +116,20 @@ public class AvalonApplicationConfig {
                               PromptBuilder promptBuilder, ResponseParser responseParser,
                               ValidationRetryPolicy validationRetryPolicy) {
         return new DefaultAgentHarness(requestFactory, promptBuilder, agentGateway, responseParser, validationRetryPolicy);
+    }
+
+    @Bean
+    AgentHarness toolCallingAgentHarness(AgentGateway agentGateway, AgentTurnRequestFactory requestFactory,
+                                         PromptBuilder promptBuilder, ResponseParser responseParser,
+                                         ValidationRetryPolicy validationRetryPolicy, ToolPolicy toolPolicy,
+                                         ToolExecutor toolExecutor) {
+        return new ToolCallingAgentHarness(requestFactory, promptBuilder, agentGateway, responseParser,
+                validationRetryPolicy, toolPolicy, toolExecutor);
+    }
+
+    @Bean
+    AgentHarnessResolver agentHarnessResolver(List<AgentHarness> harnesses) {
+        return new AgentHarnessResolver(harnesses);
     }
 
     @Bean
